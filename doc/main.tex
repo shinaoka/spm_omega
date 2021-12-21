@@ -19,6 +19,7 @@
 \newcommand{\by}{\ensuremath{\boldsymbol{y}}}
 \newcommand{\bv}{\ensuremath{\boldsymbol{v}}}
 \newcommand{\bk}{{\ensuremath{\boldsymbol{k}}}}
+\newcommand{\bh}{\ensuremath{\boldsymbol{h}}}
 \newcommand{\bq}{{\ensuremath{\boldsymbol{q}}}}
 \newcommand{\br}{{\ensuremath{\boldsymbol{r}}}}
 \newcommand{\bGamma}{\ensuremath{\boldsymbol{\Gamma}}}
@@ -86,7 +87,36 @@
 
 \section{ADMM}
 
+We want to minimize
 \begin{align}
-    A &= B
+    F(\bx) &= F(\bx) + \sum_i G_i(\bx_i)
 \end{align}
+
+\begin{align}
+    L(\bx, \bx_1, \cdots, \bh_1, \cdots) &=
+        F(\bx) + \sum_i \left(G(\bx_i) 
+           + \frac{1}{2}\bh_i^\dagger (\bx - \bx_i) 
+           + \frac{1}{2} (\bx - \bx_i)^\dagger \bh_i
+           + \frac{\mu_i}{2}\|\bx - \bx_i\|^2\right).
+\end{align}
+
+\subsection{Optimize $\bx$}
+We solve a convex problem,
+\begin{equation}
+    F(\bx, \bx^\dagger) + \frac{1}{2}\bh_i^\dagger \bx + \sum_i\left(\frac{1}{2}\bx^\dagger \bh_i  
+       + \frac{\mu_i}{2}(\bx^\dagger \bx - \bx_i^\dagger \bx - \bx^\dagger \bx_i)\right)
+\end{equation}
+w.r.t $\bx$ and $\bx^\dagger$. If $F(\bx)$ is quadratic, there is a closed-form solution.
+
+\subsection{Optimize $\bx_i$}
+For each $i$, we solve a convex problem,
+\begin{equation}
+    G_i(\bx_i, \bx_i^\dagger) 
+        - \frac{1}{2}\bh_i^\dagger \bx_i
+        - \frac{1}{2}\bx_i^\dagger \bh_i
+        + \frac{\mu_i}{2}(\|\bx_i\|^2 - \bx_i^\dagger \bx - \bx^\dagger \bx_i)
+\end{equation}
+w.r.t $\bx_i$ and $\bx_i^\dagger$.
+
+
 \end{document}
