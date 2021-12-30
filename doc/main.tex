@@ -18,6 +18,7 @@
 \newcommand{\bx}{\ensuremath{\boldsymbol{x}}}
 \newcommand{\by}{\ensuremath{\boldsymbol{y}}}
 \newcommand{\bv}{\ensuremath{\boldsymbol{v}}}
+\newcommand{\bnu}{\ensuremath{\boldsymbol{\nu}}}
 \newcommand{\bk}{{\ensuremath{\boldsymbol{k}}}}
 \newcommand{\bh}{\ensuremath{\boldsymbol{h}}}
 \newcommand{\bq}{{\ensuremath{\boldsymbol{q}}}}
@@ -78,7 +79,7 @@
 \newcommand{\HS}[1]{\textcolor{blue}{[{\bf HS}: #1]}}
 
 \title{SpM}
-\author{Many authors}
+\author{H. Shinaoka and others}
 %\date{November 2019}
 
 \begin{document}
@@ -89,32 +90,39 @@
 
 We want to minimize
 \begin{align}
-    F(\bx) &= F(\bx) + \sum_i G_i(\bx_i)
+    F(\bx) &= F_0(\bx) + \sum_{i=1}^{N} F_i(\bx_i)
 \end{align}
+subject to the contraint
+\begin{align}
+    V \bx = 1,
+\end{align}
+where $F_i$ is a convex function.
 
 \begin{align}
-    L(\bx, \bx_1, \cdots, \bh_1, \cdots) &=
-        F(\bx) + \sum_i \left(G(\bx_i) 
-           + \frac{1}{2}\bh_i^\dagger (\bx - \bx_i) 
-           + \frac{1}{2} (\bx - \bx_i)^\dagger \bh_i
-           + \frac{\mu_i}{2}\|\bx - \bx_i\|^2\right).
+    L(\bx, \bx_1, \cdots, \bh_1, \cdots, \bnu) &=
+        F_0(\bx) + \sum_{i=1}^N \left(F_i (\bx_i) 
+           + h_i^\dagger (\bx - \bx_i) 
+           + (\bx - \bx_i)^\dagger \bh_i
+           + \mu_i\|\bx - \bx_i\|^2\right)\nonumber\\
+    & \hspace{2em} - \bnu^\dagger (V\bx - \mathrm{I}) 
+                   - (V\bx - \mathrm{I})^\dagger \bnu.
 \end{align}
 
-\subsection{Optimize $\bx$}
-We solve a convex problem,
+\subsection{Update $\bx$}
+We solve the convex cost function
 \begin{equation}
-    F(\bx, \bx^\dagger) + \frac{1}{2}\bh_i^\dagger \bx + \sum_i\left(\frac{1}{2}\bx^\dagger \bh_i  
-       + \frac{\mu_i}{2}(\bx^\dagger \bx - \bx_i^\dagger \bx - \bx^\dagger \bx_i)\right)
+    F_0(\bx) + \sum_i\left( \bh_i^\dagger \bx + \bx^\dagger \bh_i  
+       + \mu_i(\bx^\dagger \bx - \bx_i^\dagger \bx - \bx^\dagger \bx_i)\right)
 \end{equation}
 w.r.t $\bx$ and $\bx^\dagger$. If $F(\bx)$ is quadratic, there is a closed-form solution.
 
-\subsection{Optimize $\bx_i$}
-For each $i$, we solve a convex problem,
+\subsection{Update $\bx_i$}
+For each term $G_i$, we minimize the convex cost function
 \begin{equation}
-    G_i(\bx_i, \bx_i^\dagger) 
-        - \frac{1}{2}\bh_i^\dagger \bx_i
-        - \frac{1}{2}\bx_i^\dagger \bh_i
-        + \frac{\mu_i}{2}(\|\bx_i\|^2 - \bx_i^\dagger \bx - \bx^\dagger \bx_i)
+    G_i(\bx_i) 
+        - \bh_i^\dagger \bx_i
+        - \bx_i^\dagger \bh_i
+        + \mu_i(\|\bx_i\|^2 - \bx_i^\dagger \bx - \bx^\dagger \bx_i)
 \end{equation}
 w.r.t $\bx_i$ and $\bx_i^\dagger$.
 
