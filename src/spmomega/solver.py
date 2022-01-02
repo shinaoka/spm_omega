@@ -6,13 +6,6 @@ from scipy.interpolate import interp1d
 import irbasis3
 from . import _xp
 
-from jax.config import config
-config.update("jax_enable_x64", True)
-
-import jax
-from jax import numpy as jnp
-from jax import grad, jit, jvp
-
 from .quad import composite_leggauss, scale_quad
 
 def __oversample(x):
@@ -24,76 +17,17 @@ def _oversample(x, n=1):
         x = __oversample(x)
     return x
 
-def _second_deriv(x, y):
-    """
-    Compute second derivate on x[1:-1]
-    """
-    assert all(x[1:] > x[0:-1]), "x must be in increasing order!"
-    rest_dim = y.shape[1:]
-    y = y.reshape((x.size, -1))
-    dx_forward  = (x[2:] - x[1:-1])[:,None]
-    dx_backward = (x[1:-1] - x[0:-2])[:,None]
-    y_ = y[1:-1,:]
-    y_forward = y[2:,:]
-    y_backward = y[:-2,:]
-    ypp = 2*(dx_backward * y_forward + dx_forward * y_backward - (dx_forward+dx_backward) * y_)/ \
-        (dx_backward**2 * dx_forward + dx_forward**2 * dx_backward)
-    return ypp.reshape((x.size-2,) + rest_dim)
 
-def _hvp(grad_f, x, v):
-  """ Compute Hessian-vector product """
-  return jvp(grad_f, [x], [v])[1]
-
-
-class Interpolator(object):
-    """
-    Interpolate a matrixed-valued complex-valued function 
-    along the first axix
-    """
-    def __init__(self, x, y):
-        self._x = x
-        self._y = y
-    
-    def __call__(self, x_new):
-        raise NotImplementedError()
-
-class LinearInterpolator(Interpolator):
-    """
-    Linear interpolation
-    """
-    def __init__(self, x, y):
-        self._x = x
-        self._y = y
-        self._interpl_re = interp1d(x, y.real, axis=0)
-        self._interpl_im = interp1d(x, y.imag, axis=0)
-    
-    def __call__(self, x_new):
-        return self._interpl_re(x_new) + 1j*self._interpl_im(x_new)
-
-class CubicSplineInterpolator(Interpolator):
-    """
-    Cubic spline interpolation
-    """
-    def __init__(self, x, y):
-        self._x = x
-        self._y = y
-        self._interpl = _xp._cspline(x, y)
-    
-    def __call__(self, x_new):
-        return self._interpl(x_new)
-
-class MultiOrbitalSolver:
-    def __init__(self, basis, interpl_cls=CubicSplineInterpolator, deg=10):
+class SpMOmegaSolver:
+    def __init__(self, basis, deg=10):
         """
         basis: irbasis3.FiniteTempBasis instance
         """
         self._basis = basis
         self._beta = basis.beta
         self._wmax = basis.wmax
-        self._interpl_cls = interpl_cls
 
         roots = self._basis.v[-1].roots()
-        #self._smpl_points = np.hstack((-self._wmax, roots, self._wmax))
         self._smpl_points = np.linspace(-self._wmax, self._wmax, 500)
         self._quad_points, self._quad_w = composite_leggauss(self._smpl_points, deg)
 
