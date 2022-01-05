@@ -1,274 +1,137 @@
 import numpy as np
+from typing import Optional, Union
 from numpy.polynomial.legendre import leggauss
 from scipy.optimize import minimize
 from scipy.interpolate import interp1d
 
 import irbasis3
-from . import _xp
+from irbasis3 import FiniteTempBasis
 
 from .quad import composite_leggauss, scale_quad
 
-def __oversample(x):
+from admmsolver.objectivefunc import ConstrainedLeastSquares, L2Regularizer, SemiPositiveDefinitePenalty
+from admmsolver.optimizer import SimpleOptimizer, Problem
+from admmsolver.matrix import identity, DiagonalMatrix
+from admmsolver.util import smooth_regularizer_coeff
+
+
+def __oversample(x: np.ndarray):
     xmid = 0.5*(x[1:] + x[:-1])
     return np.unique(np.hstack((x, xmid)))
 
-def _oversample(x, n=1):
+def _oversample(x: np.ndarray, n: int =1):
     for i in range(n):
         x = __oversample(x)
     return x
 
+def _prj_w_to_l(
+        basis: FiniteTempBasis,
+        smpl_w: np.ndarray,
+        deg: int
+    ) -> np.ndarray:
+    """ Projector from rho(omega_i) to rho_l """
+    prj_w_to_l = np.zeros((basis.size, smpl_w.size))
+    x_, w_ = leggauss(deg)
+    for s in range(smpl_w.size-1):
+        x, w = scale_quad(x_, w_, smpl_w[s], smpl_w[s+1])
+        dx = smpl_w[s+1] - smpl_w[s]
+        f = (x - smpl_w[s])/dx
+        g = (smpl_w[s+1] - x)/dx
+        for l in range(basis.size):
+            prj_w_to_l[l, s+1] += np.sum(w * basis.v[l](x) * f)
+            prj_w_to_l[l, s] += np.sum(w * basis.v[l](x) * g)
+    return prj_w_to_l
 
-class SpMOmegaSolver:
-    def __init__(self, basis, deg=10):
+
+class SpMOmega:
+    def __init__(self, basis: FiniteTempBasis, deg: int=10) -> None:
         """
-        basis: irbasis3.FiniteTempBasis instance
-        """
-        self._basis = basis
-        self._beta = basis.beta
-        self._wmax = basis.wmax
-
-        roots = self._basis.v[-1].roots()
-        self._smpl_points = np.linspace(-self._wmax, self._wmax, 500)
-        self._quad_points, self._quad_w = composite_leggauss(self._smpl_points, deg)
-
-        self._prj_rho_l = basis.v(self._quad_points).T
-
-        self._smpl_points_ovsmpl = _oversample(self._smpl_points, 3)
-    
-    @property
-    def smpl_points(self):
-        return self._smpl_points
-    
-    def interpolate(self, b_smpl, omegas):
-        b = self._interpl_cls(self._smpl_points, b_smpl)(omegas)
-        return _xp.einsum("wji,wjk->wik", b.conjugate(), b)
-    
-    def rho_l(self, b_smpl):
-        """
-        rho_{ij}(\omega_k) = (b_smpl^\dagger(\omega_k) b_smpl(\omega_k))_{ij}
-        """
-        b_quad = self._interpl_cls(self._smpl_points, b_smpl)(self._quad_points)
-        rho_quad = _xp.einsum("wji,wjk->wik", b_quad.conjugate(), b_quad)
-        return _xp.einsum('w,wij,wl->lij', self._quad_w, rho_quad, self._prj_rho_l)
-    
-    def sum_w(self, b_smpl):
-        """
-        Compute \int d w rho_{ij}(w)
-        """
-        b_quad = self._interpl_cls(self._smpl_points, b_smpl)(self._quad_points)
-        return _xp.einsum('w,wij->ij', self._quad_w, b_quad)
-    
-    def g_l(self, b_smpl):
-        """
-        Compute g_{ij}(l) = - s_l * \rho_{ij}(l)
-        """
-        return -1.* _xp.einsum("l,l...->l...", self._basis.s, self.rho_l(b_smpl))
-    
-    def fit_g_l(self, g_l, reg_L2=1e-10, b_smpl0 = None, tol=1e-15, gtol=1e-15, maxiter=15000):
-        assert g_l.ndim == 3
-        assert g_l.shape[1] == g_l.shape[2]
-        ncomp = g_l.shape[1]
-
-        def _cost(x):
-            x = x.reshape((self.smpl_points.size, ncomp, ncomp, 2))
-            b_smpl = x[:,:,:,0] + 1j*x[:,:,:,1]
-            #rho_smpl = _xp.einsum("wji,wjk->wik", b_smpl.conjugate(), b_smpl)
-            rho_l_fit = self.rho_l(b_smpl)
-            g_l_fit = - self._basis.s[:,None,None] * rho_l_fit
-
-            rho_intpl = self.interpolate(b_smpl, self._smpl_points_ovsmpl)
-            rho_pp = _second_deriv(self._smpl_points_ovsmpl, rho_intpl)
-            r = 0.5 * _xp.norm(g_l - g_l_fit)**2 + reg_L2 * _xp.norm(rho_pp)**2
-            return _xp._get_xp(x).log(r)
-            
-            #return 0.5 * _xp.norm(g_l - g_l_fit)**2 + reg_L2 * _xp.sum(_xp.abs(rho_pp))
-            #return 0.5 * _xp.norm(g_l - g_l_fit)**2 + reg_L2 * _xp.norm(rho_l_fit)**2
-            #return 0.5 * _xp.norm(g_l - g_l_fit)**2 + reg_L2 * _xp.sum(_xp.abs(rho_l_fit))
-
-        def callback(x):
-            r = _cost(x)
-            print("cost", r, np.exp(r))
-
-        cost_jit = jit(_cost)
-        jac = jit(grad(_cost))
-        if b_smpl0 is None:
-            x0 = np.zeros((self.smpl_points.size,) + g_l.shape[1:] + (2,))
-        else:
-            if not np.iscomplexobj(b_smpl0):
-                b_smpl0 = np.array(b_smpl0, dtype=np.complex128)
-            x0 = b_smpl0.view(dtype=np.float64)
-
-        grad_f = jit(grad(_cost))
-        hessp = lambda x, v: _hvp(grad_f, x.ravel(), v.ravel())
-        #r = minimize(cost_jit, x0, method='BFGS', jac=jac, tol=tol, options={'gtol': gtol, 'maxiter': maxiter}, callback=callback)
-        #r = minimize(cost_jit, x0, method='BFGS', jac=jac, tol=tol, options={'gtol': gtol, 'maxiter': maxiter}, callback=callback)
-        #print(hessp(x0, np.ones_like(x0)), x0.shape)
-        r = minimize(cost_jit, x0, method='Newton-CG', jac=jac, hessp=hessp, callback=callback,
-                options={'maxiter': maxiter, 'xtol': tol}
-            )
-        #print(r)
-        x = r.x.reshape((self.smpl_points.size, ncomp, ncomp, 2))
-        return x[:,:,:,0] + 1j*x[:,:,:,1]
-
-class SpMSolver:
-    def __init__(self, basis):
-        """
-        basis: irbasis3.FiniteTempBasis instance
         """
         self._basis = basis
         self._beta = basis.beta
         self._wmax = basis.wmax
 
-        roots = self._basis.v[-1].roots()
-        self._smpl_points = _oversample(np.hstack((-self._wmax, roots, self._wmax)))
+        self._smpl_w = _oversample(basis.v[-1].roots(), 1)
+        self._prj_w = basis.v(self._smpl_w).T
 
-    
+        # From rho(omega_i) to \int domega rho(\omega)
+        prj_sum = basis.s * (basis.u(0) + basis.u(self._beta))
+        self._prj_sum = prj_sum.reshape((1,-1))
+
+        # From sampled values to rho_l
+        self._prj_w_to_l = _prj_w_to_l(basis, self._smpl_w, deg)
+
+        # From sampled values to sum
+        self._prj_sum_from_w = self._prj_sum @ self._prj_w_to_l
+
+
     @property
-    def smpl_points(self):
-        return self._smpl_points
+    def smpl_w(self) -> np.ndarray:
+        return self._smpl_w
     
-    def fit_g_l(self, g_l, reg_L1=1e-10, rho_l0 = None, tol=1e-15, gtol=1e-15, penalty=0.0):
-        assert g_l.ndim == 1
-        nl = self._basis.size
-        prj_w = self._basis.v(self._smpl_points).T
-
-        def _cost(x):
-            xp = _xp._get_xp(x)
-            rho_l_fit = x
-            g_l_fit = - self._basis.s * rho_l_fit
-            rho_w = prj_w @ rho_l_fit
-            term0 =  0.5 * _xp.norm(g_l - g_l_fit)**2 + reg_L1 * _xp.sum(_xp.abs(rho_l_fit))
-            term1 = penalty * _xp.sum(_xp.ReLU(-rho_w))
-            return term0 + term1
-
-        jac = jit(grad(_cost))
-        if rho_l0 is None:
-            x0 = np.zeros(self.nl)
-        else:
-            x0 = rho_l0
-        r = minimize(_cost, x0, method="BFGS", jac=jac, tol=tol, options={'gtol': gtol})
-        return r.x
-
-    def fit_gtau(self, tau, gtau, reg_L1=1e-10, rho_l0 = None, tol=1e-15, gtol=1e-15, penalty=0.0):
-        assert gtau.ndim == 1
-        assert gtau.size == tau.size
-        prj_w = self._basis.v(self._smpl_points).T
-        prj_tau = -self._basis.u(tau).T * self._basis.s[None,:]
-
-        def _cost(x):
-            gtau_fit = prj_tau @ x
-            rho_w = prj_w @ x
-            term0 =  0.5 * _xp.norm(gtau - gtau_fit)**2 + reg_L1 * _xp.sum(_xp.abs(x))
-            term1 = penalty * _xp.norm(_xp.ReLU(-rho_w))**2
-            return _xp._get_xp(x).log(term0 + term1)
-
-        jac = jit(grad(_cost))
-        if rho_l0 is None:
-            x0 = np.zeros(self.nl)
-        else:
-            x0 = rho_l0
-        r = minimize(_cost, x0, method="BFGS", jac=jac, tol=tol, options={'gtol': gtol})
-        return r.x
-
-def _projector(basis, smpl_points):
-    nl = basis.size
-    mid_bins = 0.5*(smpl_points[0:-1] + smpl_points[1:])
-
-    # Projector from sampled values to rho_l
-    prj = np.zeros((nl, mid_bins.size))
-
-    # Projector from sampled values to \int dw rho(w)
-    prj_sum_rule = np.zeros(mid_bins.size)
-
-    x_, w_ = leggauss(10)
-
-    for s in range(mid_bins.size):
-        x, w = scale_quad(x_, w_, smpl_points[s], smpl_points[s+1])
-        prj_sum_rule[s] += smpl_points[s+1] - smpl_points[s]
-        for l in range(nl):
-            prj[l, s] = np.sum(basis.v[l](x) * w)
-    
-    return prj_sum_rule, prj
-
-class SmoothSolver:
-    def __init__(self, basis, deg=10, n_oversample=1):
+    def solve(
+            self,
+            gl: np.ndarray,
+            alpha: float,
+            mom: Optional[np.ndarray] = None,
+            niter: int = 10000
+        ) -> tuple[np.ndarray, dict]:
         """
-        basis: irbasis3.FiniteTempBasis instance
-        """
-        self._basis = basis
-        self._beta = basis.beta
-        self._wmax = basis.wmax
+        gl: 3d array
+           Shape must be (nl, nf, nf),
+           where nl is the number of IR basis functions
+           and nf is the number of flavors.
+        
+        alpha: float
+           L2 regularization parameter
 
-        roots = self._basis.v[-1].roots()
-        self._smpl_points = _oversample(np.hstack((-self._wmax, roots, self._wmax)), n_oversample)
-        self._quad_points, self._quad_w = composite_leggauss(self._smpl_points, deg)
-        self._prj_sum, self._prj_rho_l = _projector(basis, self._smpl_points)
-    
-    @property
-    def smpl_points(self):
-        return self._smpl_points
-
-    def rho_w(self, b_smpl):
-        return _xp.einsum("wji,wjk->wik", b_smpl.conjugate(), b_smpl)
-    
-    def rho_l(self, b_smpl):
+        mom: 2d array
+           First moment m_{ij} = int domega rho_{ij}(omega)
+        
+        niter: int
+           Max number of iterations
         """
-        rho_{ij}(\omega_k) = (b_smpl^\dagger(\omega_k) b_smpl(\omega_k))_{ij}
-        """
-        print(self.rho_w(b_smpl).shape, self._prj_rho_l.shape)
-        return _xp.einsum('wij,lw->lij', self.rho_w(b_smpl), self._prj_rho_l)
-    
-    def sum_w(self, b_smpl):
-        """
-        Compute \int d w rho_{ij}(w)
-        """
-        return _xp.einsum('wij,w->ij', self.rho_w(b_smpl), self._prj_sum)
-    
-    def g_l(self, b_smpl):
-        """
-        Compute g_{ij}(l) = - s_l * \rho_{ij}(l)
-        """
-        return -1.* _xp.einsum("l,l...->l...", self._basis.s, self.rho_l(b_smpl))
-    
-    def fit_gtau(self, tau, gtau, reg_L2=1e-10, b_smpl0 = None, tol=1e-15, gtol=1e-15, maxiter=15000, log=False):
-        assert gtau.ndim == 3
-        assert gtau.shape[1] == gtau.shape[2]
-        ncomp = gtau.shape[1]
+        assert gl.shape[0] == self._basis.size, \
+            "shape of gl is not consistent with the basis!"
+        nf = gl.shape[1] # Number of flavors
+        smpl_w = self.smpl_w
+        
+        # Fitting matrix
+        Aw = - self._basis.s[:,None] * self._prj_w_to_l
+        A = np.einsum("lw,ij->liwj", Aw, np.identity(nf**2)).\
+            reshape(Aw.shape[0]*nf**2, Aw.shape[1]*nf**2)
+        
+        # Sum-rule constraint
+        V = np.einsum("xw,ij->xiwj",
+            self._prj_sum_from_w, np.identity(nf**2))
+        V = V.reshape(nf**2, smpl_w.size*nf**2)
 
-        uni_mesh = np.linspace(-1, 1, self._smpl_points.size)
-        prj_tau = self.basis.u(tau).T
+        # Smoothness condition
+        smooth_prj = np.einsum(
+            "Ww,ij->Wiwj",
+            smooth_regularizer_coeff(smpl_w),
+            np.identity(nf**2))
+        smooth_prj = smooth_prj.reshape(-1, smpl_w.size * nf**2)
 
-        def _cost(x):
-            x = x.reshape((self.smpl_points.size, ncomp, ncomp, 2))
-            b_smpl = x[:,:,:,0] + 1j*x[:,:,:,1]
-            rho_w = self.rho_w(b_smpl)
-            rho_l_fit = self.rho_l(b_smpl)
-            gtau_fit = _xp.einsum('tl, lij->tij', prj_tau, -self._basis.s[:,None,None] * rho_l_fit)
-            rho_pp = _second_deriv(uni_mesh, rho_w)
-            r = 0.5 * _xp.norm(gtau - gtau_fit)**2 + reg_L2 * _xp.norm(rho_pp)**2
-            return _xp._get_xp(x).log(r) if log else r
+        # Optimizer
+        lstsq = ConstrainedLeastSquares(
+          1.0, A, gl.ravel(),
+          V, mom.ravel()
+        )
+        l2 = L2Regularizer(alpha, smooth_prj)
+        nn = SemiPositiveDefinitePenalty((smpl_w.size, nf, nf), 0)
+        equality_conditions = [
+            (0, 1, identity(smpl_w.size*nf**2), identity(smpl_w.size*nf**2)),
+            (0, 2, identity(smpl_w.size*nf**2), identity(smpl_w.size*nf**2)),
+        ]
+        problem = Problem([lstsq, l2, nn], equality_conditions)
+        opt = SimpleOptimizer(problem, x0=None)
 
-        def callback(x):
-            r = _cost(x)
-            print("cost", r, np.exp(r) if log else r)
+        # Run
+        opt.solve(niter)
 
-        cost_jit = jit(_cost)
-        jac = jit(grad(_cost))
-        if b_smpl0 is None:
-            x0 = np.zeros((self.smpl_points.size,) + gtau.shape[1:] + (2,))
-        else:
-            if not np.iscomplexobj(b_smpl0):
-                b_smpl0 = np.array(b_smpl0, dtype=np.complex128)
-            x0 = b_smpl0.view(dtype=np.float64)
+        info = {
+            "optimizer": opt,
+        }
 
-        grad_f = jit(grad(_cost))
-        hessp = lambda x, v: _hvp(grad_f, x.ravel(), v.ravel())
-        r = minimize(cost_jit, x0, method='BFGS', jac=jac, tol=tol, options={'gtol': gtol, 'maxiter': maxiter}, callback=callback)
-        #r = minimize(cost_jit, x0, method='BFGS', jac=jac, tol=tol, options={'gtol': gtol, 'maxiter': maxiter}, callback=callback)
-        #print(hessp(x0, np.ones_like(x0)), x0.shape)
-        #r = minimize(cost_jit, x0, method='Newton-CG', jac=jac, hessp=hessp, callback=callback,
-                #options={'maxiter': maxiter, 'xtol': tol}
-            #)
-        #print(r)
-        x = r.x.reshape((self.smpl_points.size, ncomp, ncomp, 2))
-        return x[:,:,:,0] + 1j*x[:,:,:,1]
+        return opt.x[2], info
