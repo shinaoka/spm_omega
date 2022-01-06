@@ -1,4 +1,4 @@
-# Copyright (C) 2020-2021 Markus Wallerberger and others
+# Copyright (C) 2021-2022 Hiroshi Shinaoka and others
 # SPDX-License-Identifier: MIT
 import io, os.path, re
 from setuptools import setup, find_packages
@@ -46,7 +46,7 @@ setup(
 
     url=REPO_URL,
     author=[
-        'Markus Wallerberger',
+        'Hiroshi Shinaoka',
         'Hiroshi Shinaoka',
         'Kazuyoshi Yoshimi',
         'Junya Otsuki',
