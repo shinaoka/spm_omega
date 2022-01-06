@@ -54,14 +54,14 @@ class SpMOmega:
         self._smpl_w = _oversample(basis.v[-1].roots(), 1)
         self._prj_w = basis.v(self._smpl_w).T
 
-        # From rho(omega_i) to \int domega rho(\omega)
+        # From rho_l to \int domega rho(\omega)
         prj_sum = basis.s * (basis.u(0) + basis.u(self._beta))
         self._prj_sum = prj_sum.reshape((1,-1))
 
-        # From sampled values to rho_l
+        # From rho(omega_i) to rho_l
         self._prj_w_to_l = _prj_w_to_l(basis, self._smpl_w, deg)
 
-        # From sampled values to sum
+        # From rho(omega_i) to \int domega rho(\omega)
         self._prj_sum_from_w = self._prj_sum @ self._prj_w_to_l
 
 
@@ -73,7 +73,7 @@ class SpMOmega:
             self,
             gl: np.ndarray,
             alpha: float,
-            mom: Optional[np.ndarray] = None,
+            moment: Optional[np.ndarray] = None,
             niter: int = 10000
         ) -> tuple[np.ndarray, dict]:
         """
@@ -85,16 +85,28 @@ class SpMOmega:
         alpha: float
            L2 regularization parameter
 
-        mom: 2d array
+        moment: 2d array
            First moment m_{ij} = int domega rho_{ij}(omega)
         
         niter: int
            Max number of iterations
         """
+        assert gl.ndim == 3
         assert gl.shape[0] == self._basis.size, \
             "shape of gl is not consistent with the basis!"
+        assert gl.shape[1] == gl.shape[2], \
+            "Invalid shape of gl"
+        if moment is not None:
+            assert gl.shape[1:] == moment.shape
+        
         nf = gl.shape[1] # Number of flavors
         smpl_w = self.smpl_w
+
+        if moment is None:
+            moment = np.einsum('l,lij->ij',
+                - (self._basis.u(0) + self._basis.u(self._beta)),
+                gl
+            )
         
         # Fitting matrix
         Aw = - self._basis.s[:,None] * self._prj_w_to_l
@@ -116,7 +128,7 @@ class SpMOmega:
         # Optimizer
         lstsq = ConstrainedLeastSquares(
           1.0, A, gl.ravel(),
-          V, mom.ravel()
+          V, moment.ravel()
         )
         l2 = L2Regularizer(alpha, smooth_prj)
         nn = SemiPositiveDefinitePenalty((smpl_w.size, nf, nf), 0)
@@ -134,4 +146,4 @@ class SpMOmega:
             "optimizer": opt,
         }
 
-        return opt.x[2], info
+        return opt.x[2].reshape((self.smpl_w.size,) + gl.shape[1:]), info
