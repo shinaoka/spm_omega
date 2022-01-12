@@ -10,7 +10,7 @@ from irbasis3 import FiniteTempBasis
 from .quad import composite_leggauss, scale_quad
 
 from admmsolver.objectivefunc import ConstrainedLeastSquares, L2Regularizer, SemiPositiveDefinitePenalty
-from admmsolver.optimizer import SimpleOptimizer, Problem
+from admmsolver.optimizer import SimpleOptimizer, Model
 from admmsolver.matrix import identity, DiagonalMatrix
 from admmsolver.util import smooth_regularizer_coeff
 
@@ -107,6 +107,7 @@ class SpMOmega:
                 - (self._basis.u(0) + self._basis.u(self._beta)),
                 gl
             )
+            moment = 0.5*(moment + moment.T.conj())
         
         # Fitting matrix
         Aw = - self._basis.s[:,None] * self._prj_w_to_l
@@ -136,7 +137,7 @@ class SpMOmega:
             (0, 1, identity(smpl_w.size*nf**2), identity(smpl_w.size*nf**2)),
             (0, 2, identity(smpl_w.size*nf**2), identity(smpl_w.size*nf**2)),
         ]
-        problem = Problem([lstsq, l2, nn], equality_conditions)
+        problem = Model([lstsq, l2, nn], equality_conditions)
         opt = SimpleOptimizer(problem, x0=None)
 
         # Run
