@@ -1,5 +1,6 @@
+from stat import FILE_ATTRIBUTE_NOT_CONTENT_INDEXED
 import numpy as np
-from typing import Optional, Union
+from typing import Optional, Union, Tuple
 from numpy.polynomial.legendre import leggauss
 from scipy.optimize import minimize
 from scipy.interpolate import interp1d
@@ -9,7 +10,7 @@ from irbasis3 import FiniteTempBasis
 
 from .quad import composite_leggauss, scale_quad
 
-from admmsolver.objectivefunc import ConstrainedLeastSquares, L2Regularizer, SemiPositiveDefinitePenalty
+from admmsolver.objectivefunc import LeastSquares, ConstrainedLeastSquares, L2Regularizer, SemiPositiveDefinitePenalty
 from admmsolver.optimizer import SimpleOptimizer, Model
 from admmsolver.matrix import identity, DiagonalMatrix
 from admmsolver.util import smooth_regularizer_coeff
@@ -74,8 +75,11 @@ class SpMOmega:
             gl: np.ndarray,
             alpha: float,
             moment: Optional[np.ndarray] = None,
-            niter: int = 10000
-        ) -> tuple[np.ndarray, dict]:
+            niter: int = 10000,
+            spd: bool = True,
+            interval_update_mu: int =100,
+            fixed_boundary_condition: bool = True
+        ) -> Tuple[np.ndarray, dict]:
         """
         gl: 3d array
            Shape must be (nl, nf, nf),
@@ -90,6 +94,15 @@ class SpMOmega:
         
         niter: int
            Max number of iterations
+
+        spd:
+           Use semi-positive-definite condition
+
+        fixed_boundary_condition:
+           Set rho(omega) = 0 at the boundaries
+
+        interval_update_mu:
+          Interval for updating mu
         """
         assert gl.ndim == 3
         assert gl.shape[0] == self._basis.size, \
@@ -102,24 +115,39 @@ class SpMOmega:
         nf = gl.shape[1] # Number of flavors
         smpl_w = self.smpl_w
 
-        if moment is None:
-            moment = np.einsum('l,lij->ij',
-                - (self._basis.u(0) + self._basis.u(self._beta)),
-                gl
-            )
-            moment = 0.5*(moment + moment.T.conj())
-        
+        ###
         # Fitting matrix
+        ###
         Aw = - self._basis.s[:,None] * self._prj_w_to_l
         A = np.einsum("lw,ij->liwj", Aw, np.identity(nf**2)).\
             reshape(Aw.shape[0]*nf**2, Aw.shape[1]*nf**2)
         
-        # Sum-rule constraint
-        V = np.einsum("xw,ij->xiwj",
-            self._prj_sum_from_w, np.identity(nf**2))
-        V = V.reshape(nf**2, smpl_w.size*nf**2)
+        ###
+        # Various contraints V*x = W
+        ###
+        V = []
+        W = []
 
-        # Smoothness condition
+        # Sum-rule constraint
+        if moment is not None:
+            V_sumrule = np.einsum("xw,ij->xiwj",
+                self._prj_sum_from_w, np.identity(nf**2))
+            V.append(V_sumrule.reshape(nf**2, smpl_w.size*nf**2))
+            W.append(moment.ravel())
+
+        # Fixed-boundary condition
+        if fixed_boundary_condition:
+            V_bd = np.zeros((2, nf, nf) + (smpl_w.size, nf, nf))
+            for i in range(nf):
+               for j in range(nf):
+                   V_bd[0,i,j,  0,i,j] = 1 # At omega = -wmax
+                   V_bd[1,i,j, -1,i,j] = 1 # At omega = wmax
+            V.append(V_bd.reshape(2*nf**2, smpl_w.size*nf**2))
+            W.append(np.zeros(2*nf**2))
+
+        ###
+        #  Smoothness condition
+        ###
         smooth_prj = np.einsum(
             "Ww,ij->Wiwj",
             smooth_regularizer_coeff(smpl_w),
@@ -127,24 +155,33 @@ class SpMOmega:
         smooth_prj = smooth_prj.reshape(-1, smpl_w.size * nf**2)
 
         # Optimizer
-        lstsq = ConstrainedLeastSquares(
-          1.0, A, gl.ravel(),
-          V, moment.ravel()
-        )
-        l2 = L2Regularizer(alpha, smooth_prj)
-        nn = SemiPositiveDefinitePenalty((smpl_w.size, nf, nf), 0)
         equality_conditions = [
             (0, 1, identity(smpl_w.size*nf**2), identity(smpl_w.size*nf**2)),
-            (0, 2, identity(smpl_w.size*nf**2), identity(smpl_w.size*nf**2)),
         ]
-        problem = Model([lstsq, l2, nn], equality_conditions)
-        opt = SimpleOptimizer(problem, x0=None)
+        if len(V) != 0:
+            #print("V", np.vstack(V).shape)
+            #print("W", np.vstack(W).shape)
+            lstsq = ConstrainedLeastSquares(
+              1.0, A, gl.ravel(),
+              np.vstack(V),
+              np.vstack(W).ravel()
+            )
+        else:
+            lstsq = LeastSquares(1.0, A, gl.ravel())
+        l2 = L2Regularizer(alpha, smooth_prj)
+        terms = [lstsq, l2]
+        if spd:
+            nn = SemiPositiveDefinitePenalty((smpl_w.size, nf, nf), 0)
+            equality_conditions.append((0, 2, identity(smpl_w.size*nf**2), identity(smpl_w.size*nf**2)))
+            terms.append(nn)
+        model = Model(terms, equality_conditions)
+        opt = SimpleOptimizer(model, x0=None)
 
         # Run
-        opt.solve(niter)
+        opt.solve(niter, interval_update_mu=interval_update_mu)
 
         info = {
             "optimizer": opt,
         }
 
-        return opt.x[2].reshape((self.smpl_w.size,) + gl.shape[1:]), info
+        return opt.x[0].reshape((self.smpl_w.size,) + gl.shape[1:]), info
