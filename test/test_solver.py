@@ -1,7 +1,7 @@
-from spmomega.solver import _prj_w_to_l, SpMOmega
+from spmomega.solver import _prj_w_to_l, SpMOmega, SpMOmegaMatsubara
 
 import numpy as np
-from irbasis3 import FiniteTempBasis, KernelFFlat
+from irbasis3 import FiniteTempBasis, KernelFFlat, MatsubaraSampling
 import pytest
 
 def test_prj_w_to_l():
@@ -66,5 +66,32 @@ def test_reconst_rho_w(rho):
 
     solver = SpMOmega(basis)
     rho_w, _ = solver.solve(g_l, alpha, niter=1000)
+
+    np.testing.assert_allclose(rho_w, rho(solver.smpl_w), rtol=0, atol=0.05)
+
+@pytest.mark.parametrize("rho", [(rho_single_orb), (rho_two_orb)])
+def test_reconst_rho_w_matsubara(rho):
+    wmax = 10.0
+    beta = 100.0
+    alpha = 1e-10
+    niv = 1000
+    vsample = 2*np.arange(-niv, niv)+1
+
+    lambda_ = wmax * beta
+    basis = FiniteTempBasis(
+        KernelFFlat(lambda_),
+        "F", beta, eps=1e-12)
+    smpl = MatsubaraSampling(basis, vsample)
+    
+    # Compute exact rho_l, g_l, giv
+    rho_test = rho(np.linspace(-1,1,100))
+    rho_l = basis.v.overlap(rho, axis=0)
+    rho_l = rho_l.reshape((basis.size,) + rho_test.shape[1:])
+    g_l = -basis.s[:,None,None] * rho_l
+    g_iv = smpl.evaluate(g_l, axis=0)
+    nf = g_iv.shape[1]
+    
+    solver = SpMOmegaMatsubara(beta, "F", wmax, vsample)
+    rho_w, info = solver.solve(g_iv, alpha, niter=1000)
 
     np.testing.assert_allclose(rho_w, rho(solver.smpl_w), rtol=0, atol=0.05)
