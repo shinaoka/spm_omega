@@ -1,7 +1,7 @@
-from spmomega.solver import _prj_w_to_l, SpMOmega, SpMOmegaMatsubara
+from spmomega.solver import _prj_w_to_l, SpMOmega, SpMOmegaSmpl
 
 import numpy as np
-from irbasis3 import FiniteTempBasis, KernelFFlat, MatsubaraSampling
+from irbasis3 import FiniteTempBasis, KernelFFlat, MatsubaraSampling, TauSampling
 import pytest
 
 def test_prj_w_to_l():
@@ -76,22 +76,29 @@ def test_reconst_rho_w_matsubara(rho):
     alpha = 1e-10
     niv = 1000
     vsample = 2*np.arange(-niv, niv)+1
+    tausample = np.linspace(0, beta, 2*niv)
 
     lambda_ = wmax * beta
     basis = FiniteTempBasis(
         KernelFFlat(lambda_),
         "F", beta, eps=1e-12)
-    smpl = MatsubaraSampling(basis, vsample)
+    smpl_matsu = MatsubaraSampling(basis, vsample)
+    smpl_tau = TauSampling(basis, tausample)
     
-    # Compute exact rho_l, g_l, giv
+    # Compute exact rho_l, g_l, g_iv, g_tau
     rho_test = rho(np.linspace(-1,1,100))
     rho_l = basis.v.overlap(rho, axis=0)
     rho_l = rho_l.reshape((basis.size,) + rho_test.shape[1:])
     g_l = -basis.s[:,None,None] * rho_l
-    g_iv = smpl.evaluate(g_l, axis=0)
-    nf = g_iv.shape[1]
     
-    solver = SpMOmegaMatsubara(beta, "F", wmax, vsample)
-    rho_w, info = solver.solve(g_iv, alpha, niter=1000)
+    # From Matsubara
+    g_iv = smpl_matsu.evaluate(g_l, axis=0)
+    solver = SpMOmegaSmpl(beta, "F", wmax, vsample=vsample)
+    rho_w, _ = solver.solve(g_iv, alpha, niter=1000)
+    np.testing.assert_allclose(rho_w, rho(solver.smpl_w), rtol=0, atol=0.05)
 
+    # From tau
+    gtau = smpl_tau.evaluate(g_l, axis=0)
+    solver = SpMOmegaSmpl(beta, "F", wmax, tausample=tausample)
+    rho_w, _ = solver.solve(gtau, alpha, niter=1000)
     np.testing.assert_allclose(rho_w, rho(solver.smpl_w), rtol=0, atol=0.05)

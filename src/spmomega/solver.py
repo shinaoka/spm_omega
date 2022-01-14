@@ -6,7 +6,7 @@ from scipy.optimize import minimize
 from scipy.interpolate import interp1d
 
 import irbasis3
-from irbasis3 import FiniteTempBasis, KernelFFlat
+from irbasis3 import FiniteTempBasis, KernelFFlat, MatsubaraSampling, TauSampling
 
 from .quad import composite_leggauss, scale_quad
 
@@ -204,24 +204,32 @@ class SpMOmega:
         return opt.x[0].reshape((self.smpl_w.size,) + gl.shape[1:]), info
 
 
-class SpMOmegaMatsubara:
+class SpMOmegaSmpl:
     def __init__(
         self,
         beta: float,
         statistics: str,
         wmax: float,
-        vsample: np.ndarray,
+        vsample: np.ndarray = None,
+        tausample: np.ndarray = None,
         deg: int=10,
         eps: float=1e-7) -> None:
         """
         """
         basis = FiniteTempBasis(KernelFFlat(beta*wmax), statistics, beta, eps)
-        stat_shift = {"F": 1, "B": 0}[statistics]
-        assert all(vsample%2 == stat_shift)
-
         self._basis = basis
         self._beta = basis.beta
-        self._vsample = vsample
+        self._vsample = None
+        self._tausample = None
+        if vsample is not None:
+            stat_shift = {"F": 1, "B": 0}[statistics]
+            assert all(vsample%2 == stat_shift)
+            self._smpl_points = vsample
+            self._smpl = MatsubaraSampling(basis, self._smpl_points)
+        else:
+            assert vsample is None
+            self._smpl_points = tausample
+            self._smpl = TauSampling(basis, self._smpl_points)
         self._wmax = basis.wmax
 
         self._smpl_w = _oversample(basis.v[-1].roots(), 1)
@@ -229,9 +237,8 @@ class SpMOmegaMatsubara:
         # From rho(omega_i) to rho_l
         prj_w_to_l = _prj_w_to_l(basis, self._smpl_w, deg)
 
-        # From rho(omega_i) to vsample
-        # (niv, nl)
-        self._prj_w_to_iv = basis.uhat(vsample).T @ (-basis.s[:,None] * prj_w_to_l)
+        # From rho(omega_i) to sampling points
+        self._prj_w_to_smpl = self._smpl.matrix.a @ (-basis.s[:,None] * prj_w_to_l)
 
         # From rho(omega_i) to \int domega rho(\omega)
         prj_sum = basis.s * (basis.u(0) + basis.u(self._beta))
@@ -243,12 +250,12 @@ class SpMOmegaMatsubara:
         return self._smpl_w
 
     def predict(self, rhow: np.ndarray) -> np.ndarray:
-        return np.einsum('Ww,wij->Wij', self._prj_w_to_iv, rhow, optimize=True)
+        return np.einsum('Ww,wij->Wij', self._prj_w_to_smpl, rhow, optimize=True)
 
     
     def solve(
             self,
-            giv: np.ndarray,
+            ginput: np.ndarray,
             alpha: float,
             moment: Optional[np.ndarray] = None,
             niter: int = 10000,
@@ -259,17 +266,15 @@ class SpMOmegaMatsubara:
             rtol: float = 1e-10
         ) -> Dict:
         """
-        giv: 3d array
-           Shape must be (nv, nf, nf),
-           where nv is the number of Matsubara frequeicies,
+        ginput: 3d array of shape (nsmpl, nf, nf),
+           where nv is the number of Matsubara frequeicies/times,
            and nf is the number of flavors.
         
         alpha: float
            L2 regularization parameter
 
-        moment: None, 2d array
+        moment: None or 2d array
            First moment m_{ij} = int domega rho_{ij}(omega)
-           If moment=="auto", the moment will be estimated from the input data.
         
         niter: int
            Max number of iterations
@@ -287,24 +292,25 @@ class SpMOmegaMatsubara:
           Initial guess
 
         rtol:
-          Stopping condition. Check if all relative norms of all primal and dual residuals are smaller than rtol.
+          Stopping condition.
+          Check if all relative norms of all primal and dual residuals are smaller than rtol.
         """
-        assert giv.ndim == 3
-        assert giv.shape[0] == self._vsample.size, \
-            "shape of giv is not consistent with sampling frequencies!"
-        assert giv.shape[1] == giv.shape[2], \
-            "Invalid shape of giv"
+        assert ginput.ndim == 3
+        assert ginput.shape[0] == self._smpl_points.size, \
+            "shape of ginput is not consistent with sampling frequencies!"
+        assert ginput.shape[1] == ginput.shape[2], \
+            "Invalid shape of ginput"
         if isinstance(moment, np.ndarray):
-            assert giv.shape[1:] == moment.shape
+            assert ginput.shape[1:] == moment.shape
         
-        nf = giv.shape[1] # Number of flavors
+        nf = ginput.shape[1] # Number of flavors
         smpl_w = self.smpl_w
         x_size = smpl_w.size*nf**2
 
         ###
         # Fitting matrix
         ###
-        Aw = self._prj_w_to_iv
+        Aw = self._prj_w_to_smpl
         A = np.einsum("Ww,ij->Wiwj", Aw, np.identity(nf**2)).\
             reshape(Aw.shape[0]*nf**2, Aw.shape[1]*nf**2)
         
@@ -345,12 +351,12 @@ class SpMOmegaMatsubara:
         ]
         if len(V) != 0:
             lstsq = ConstrainedLeastSquares(
-              1.0, A, giv.ravel(),
+              1.0, A, ginput.ravel(),
               np.vstack(V),
               np.hstack(W)
             )
         else:
-            lstsq = LeastSquares(1.0, A, giv.ravel())
+            lstsq = LeastSquares(1.0, A, ginput.ravel())
         l2 = L2Regularizer(alpha, smooth_prj)
         terms = [lstsq, l2]
         if spd:
@@ -370,4 +376,4 @@ class SpMOmegaMatsubara:
             "lstsq": lstsq(opt.x[0])
         }
 
-        return opt.x[0].reshape((-1,) + giv.shape[1:]), info
+        return opt.x[0].reshape((-1,) + ginput.shape[1:]), info
