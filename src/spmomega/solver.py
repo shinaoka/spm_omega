@@ -74,11 +74,13 @@ class SpMOmega:
             self,
             gl: np.ndarray,
             alpha: float,
-            moment: Optional[np.ndarray] = None,
+            moment: Optional[Union[np.ndarray,str]] = None,
             niter: int = 10000,
             spd: bool = True,
             interval_update_mu: int =100,
-            fixed_boundary_condition: bool = True
+            fixed_boundary_condition: bool = True,
+            initial_guess: Optional[np.ndarray] = None,
+            rtol: float = 1e-10
         ) -> Tuple[np.ndarray, dict]:
         """
         gl: 3d array
@@ -89,8 +91,9 @@ class SpMOmega:
         alpha: float
            L2 regularization parameter
 
-        moment: 2d array
+        moment: None, 2d array, or "auto"
            First moment m_{ij} = int domega rho_{ij}(omega)
+           If moment=="auto", the moment will be estimated from the input data.
         
         niter: int
            Max number of iterations
@@ -103,13 +106,19 @@ class SpMOmega:
 
         interval_update_mu:
           Interval for updating mu
+
+        initial_guess:
+          Initial guess
+
+        rtol:
+          Stopping condition. Check if all relative norms of all primal and dual residuals are smaller than rtol.
         """
         assert gl.ndim == 3
         assert gl.shape[0] == self._basis.size, \
             "shape of gl is not consistent with the basis!"
         assert gl.shape[1] == gl.shape[2], \
             "Invalid shape of gl"
-        if moment is not None:
+        if isinstance(moment, np.ndarray):
             assert gl.shape[1:] == moment.shape
         
         nf = gl.shape[1] # Number of flavors
@@ -129,6 +138,13 @@ class SpMOmega:
         W = []
 
         # Sum-rule constraint
+        if moment == "auto":
+            moment = np.einsum('l,lij->ij',
+                 - (self._basis.u(0) + self._basis.u(self._beta)),
+                 gl
+            )
+            moment = 0.5*(moment + moment.T.conj())
+
         if moment is not None:
             V_sumrule = np.einsum("xw,ij->xiwj",
                 self._prj_sum_from_w, np.identity(nf**2))
@@ -159,12 +175,10 @@ class SpMOmega:
             (0, 1, identity(smpl_w.size*nf**2), identity(smpl_w.size*nf**2)),
         ]
         if len(V) != 0:
-            #print("V", np.vstack(V).shape)
-            #print("W", np.vstack(W).shape)
             lstsq = ConstrainedLeastSquares(
               1.0, A, gl.ravel(),
               np.vstack(V),
-              np.vstack(W).ravel()
+              np.hstack(W)
             )
         else:
             lstsq = LeastSquares(1.0, A, gl.ravel())
@@ -175,13 +189,16 @@ class SpMOmega:
             equality_conditions.append((0, 2, identity(smpl_w.size*nf**2), identity(smpl_w.size*nf**2)))
             terms.append(nn)
         model = Model(terms, equality_conditions)
-        opt = SimpleOptimizer(model, x0=None)
+        if initial_guess is not None:
+            initial_guess = len(terms) * [initial_guess]
+        opt = SimpleOptimizer(model, x0=initial_guess)
 
         # Run
-        opt.solve(niter, interval_update_mu=interval_update_mu)
+        opt.solve(niter, interval_update_mu=interval_update_mu, rtol=rtol)
 
         info = {
             "optimizer": opt,
+            "lstsq": lstsq(opt.x[0])
         }
 
         return opt.x[0].reshape((self.smpl_w.size,) + gl.shape[1:]), info
