@@ -1,7 +1,7 @@
-from spmomega.solver import _prj_w_to_l, SpMOmega, SpMOmegaSmpl
+from spmomega.solver import _prj_w_to_l, SpMSmooth, SpM
 
 import numpy as np
-from irbasis3 import FiniteTempBasis, KernelFFlat, MatsubaraSampling, TauSampling
+from sparse_ir import FiniteTempBasis, KernelFFlat, MatsubaraSampling, TauSampling
 import pytest
 
 def test_prj_w_to_l():
@@ -47,30 +47,9 @@ def rho_two_orb(omega):
     rho_omega[:,1,1] = 0.4*gaussian(omega, 1.0, 0.8) + 0.4*gaussian(omega, -1.0, 0.8)
     return np.einsum('ji,wjk,kl->wil', rot_mat, rho_omega, rot_mat)
 
-@pytest.mark.parametrize("rho", [rho_single_orb, rho_two_orb])
-def test_reconst_rho_w(rho):
-    wmax = 10.0
-    beta = 100.0
-    alpha = 1e-10
-
-    lambda_ = wmax * beta
-    basis = FiniteTempBasis(
-        KernelFFlat(lambda_),
-        "F", beta, eps=1e-7)
-    
-    # Compute exact rho_l and g_l
-    rho_test = rho(np.linspace(-1,1,100))
-    rho_l = basis.v.overlap(rho, axis=0)
-    rho_l = rho_l.reshape((basis.size,) + rho_test.shape[1:])
-    g_l = -basis.s[:,None,None] * rho_l
-
-    solver = SpMOmega(basis)
-    rho_w, _ = solver.solve(g_l, alpha, niter=1000)
-
-    np.testing.assert_allclose(rho_w, rho(solver.smpl_w), rtol=0, atol=0.05)
 
 @pytest.mark.parametrize("rho", [(rho_single_orb), (rho_two_orb)])
-def test_reconst_rho_w_matsubara(rho):
+def test_SpM(rho):
     wmax = 10.0
     beta = 100.0
     alpha = 1e-10
@@ -93,12 +72,47 @@ def test_reconst_rho_w_matsubara(rho):
     
     # From Matsubara
     g_iv = smpl_matsu.evaluate(g_l, axis=0)
-    solver = SpMOmegaSmpl(beta, "F", wmax, vsample=vsample)
+    solver = SpM(beta, "F", wmax, vsample=vsample)
+    rho_l_reconst, _ = solver.solve(g_iv, alpha, niter=1000)
+    np.testing.assert_allclose(rho_l_reconst, rho_l, rtol=0, atol=0.05)
+
+    # From tau
+    gtau = smpl_tau.evaluate(g_l, axis=0)
+    solver = SpM(beta, "F", wmax, tausample=tausample)
+    rho_l_reconst, _ = solver.solve(gtau, alpha, niter=1000)
+    np.testing.assert_allclose(rho_l_reconst, rho_l, rtol=0, atol=0.05)
+
+
+@pytest.mark.parametrize("rho", [(rho_single_orb), (rho_two_orb)])
+def test_SpMSmooth(rho):
+    wmax = 10.0
+    beta = 100.0
+    alpha = 1e-10
+    niv = 1000
+    vsample = 2*np.arange(-niv, niv)+1
+    tausample = np.linspace(0, beta, 2*niv)
+
+    lambda_ = wmax * beta
+    basis = FiniteTempBasis(
+        KernelFFlat(lambda_),
+        "F", beta, eps=1e-12)
+    smpl_matsu = MatsubaraSampling(basis, vsample)
+    smpl_tau = TauSampling(basis, tausample)
+    
+    # Compute exact rho_l, g_l, g_iv, g_tau
+    rho_test = rho(np.linspace(-1,1,100))
+    rho_l = basis.v.overlap(rho, axis=0)
+    rho_l = rho_l.reshape((basis.size,) + rho_test.shape[1:])
+    g_l = -basis.s[:,None,None] * rho_l
+    
+    # From Matsubara
+    g_iv = smpl_matsu.evaluate(g_l, axis=0)
+    solver = SpMSmooth(beta, "F", wmax, vsample=vsample)
     rho_w, _ = solver.solve(g_iv, alpha, niter=1000)
     np.testing.assert_allclose(rho_w, rho(solver.smpl_w), rtol=0, atol=0.05)
 
     # From tau
     gtau = smpl_tau.evaluate(g_l, axis=0)
-    solver = SpMOmegaSmpl(beta, "F", wmax, tausample=tausample)
+    solver = SpMSmooth(beta, "F", wmax, tausample=tausample)
     rho_w, _ = solver.solve(gtau, alpha, niter=1000)
     np.testing.assert_allclose(rho_w, rho(solver.smpl_w), rtol=0, atol=0.05)

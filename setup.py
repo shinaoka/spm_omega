@@ -20,20 +20,20 @@ def extract_version(*parts):
     return match.group(1)
 
 
-VERSION = extract_version('src', 'irbasis3', '__init__.py')
-REPO_URL = "https://github.com/SpM-lab/irbasis3"
+VERSION = extract_version('src', 'sparse_ir', '__init__.py')
+REPO_URL = "https://github.com/SpM-lab/sparse_ir"
 LONG_DESCRIPTION = readfile('README.md')
 
 setup(
-    name='irbasis3',
+    name='spmomega',
     version=VERSION,
 
     description=
-        'intermediate representation (IR) basis for electronic propagator',
+        'Sparse-modeling solvers for analytic continuation',
     long_description=LONG_DESCRIPTION,
     long_description_content_type='text/markdown',
     keywords=' '.join([
-        'irbasis'
+        'sparse modeling'
         ]),
     classifiers=[
         'Development Status :: 3 - Alpha',
@@ -47,20 +47,18 @@ setup(
     url=REPO_URL,
     author=[
         'Hiroshi Shinaoka',
-        'Hiroshi Shinaoka',
-        'Kazuyoshi Yoshimi',
-        'Junya Otsuki',
-        'Chikano Naoya'
         ],
-    author_email='markus.wallerberger@tuwien.ac.at',
+    author_email='h.shinaoka@gmail.com',
 
     python_requires='>=3',
     install_requires=[
         'numpy',
-        'scipy>=1.5' # For scipy.linalg.lapack.dgesjv
+        'scipy',
+        'sparse_ir',
+        'xprec'
     ],
     extras_require={
-        'test': ['pytest', 'irbasis', 'xprec'],
+        'test': ['pytest'],
         'doc': ['sphinx>=2.1', 'myst-parser', 'sphinx_rtd_theme'],
         },
 
