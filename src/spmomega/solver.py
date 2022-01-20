@@ -90,10 +90,12 @@ class SpM:
             assert all(vsample%2 == stat_shift)
             self._smpl_points = vsample
             self._smpl = MatsubaraSampling(basis, self._smpl_points)
-        else:
+        elif tausample is not None:
             assert vsample is None
             self._smpl_points = tausample
             self._smpl = TauSampling(basis, self._smpl_points)
+        else:
+            raise ValueError("One of vsample and tausample must be given!")
         self._wmax = basis.wmax
 
         # For spd condition
@@ -121,7 +123,7 @@ class SpM:
             interval_update_mu: int =100,
             initial_guess: Optional[np.ndarray] = None,
             rtol: float = 1e-10
-        ) -> Dict:
+        ):
         """
         ginput: 3d array of shape (nsmpl, nf, nf),
            where nv is the number of Matsubara frequeicies/times,
@@ -252,10 +254,11 @@ class SpMSmooth:
             assert all(vsample%2 == stat_shift)
             self._smpl_points = vsample
             self._smpl = MatsubaraSampling(basis, self._smpl_points)
-        else:
-            assert vsample is None
+        elif tausample is not None:
             self._smpl_points = tausample
             self._smpl = TauSampling(basis, self._smpl_points)
+        else:
+            raise ValueError("One of vsample and tausample must be given!")
         self._wmax = basis.wmax
 
         self._smpl_w = _oversample(basis.v[-1].roots(), 1)
@@ -290,7 +293,7 @@ class SpMSmooth:
             fixed_boundary_condition: bool = True,
             initial_guess: Optional[np.ndarray] = None,
             rtol: float = 1e-10
-        ) -> Dict:
+        ):
         """
         ginput: 3d array of shape (nsmpl, nf, nf),
            where nv is the number of Matsubara frequeicies/times,
@@ -390,9 +393,10 @@ class SpMSmooth:
             equality_conditions.append((0, 2, identity(x_size), identity(x_size)))
             terms.append(nn)
         model = Model(terms, equality_conditions)
+        x0 = None
         if initial_guess is not None:
-            initial_guess = len(terms) * [initial_guess]
-        opt = SimpleOptimizer(model, x0=initial_guess)
+            x0 = len(terms) * [initial_guess]
+        opt = SimpleOptimizer(model, x0=x0)
 
         # Run
         opt.solve(niter, interval_update_mu=interval_update_mu, rtol=rtol)
