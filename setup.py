@@ -17,10 +17,11 @@ def extract_version(*parts):
     initfile = readfile(*parts)
     version_re = re.compile(r"(?m)^__version__\s*=\s*['\"]([^'\"]*)['\"]")
     match = version_re.search(initfile)
+    assert match is not None
     return match.group(1)
 
 
-VERSION = extract_version('src', 'sparse_ir', '__init__.py')
+VERSION = extract_version('src', 'admmsolver', '__init__.py')
 REPO_URL = "https://github.com/SpM-lab/sparse_ir"
 LONG_DESCRIPTION = readfile('README.md')
 
@@ -45,9 +46,7 @@ setup(
         ],
 
     url=REPO_URL,
-    author=[
-        'Hiroshi Shinaoka',
-        ],
+    author= 'Hiroshi Shinaoka',
     author_email='h.shinaoka@gmail.com',
 
     python_requires='>=3',
@@ -55,7 +54,7 @@ setup(
         'numpy',
         'scipy',
         'sparse_ir',
-        'admmsolver>=0.3',
+        'admmsolver>=0.5',
         'xprec'
     ],
     extras_require={
