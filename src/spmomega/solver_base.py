@@ -1,9 +1,11 @@
 # Copyright (C) 2021-2022 Hiroshi Shinaoka and others
 # SPDX-License-Identifier: MIT
 import numpy as np
+from scipy.linalg import block_diag
 from typing import Optional, Union, Tuple, Dict, List, cast
 
 from sparse_ir import FiniteTempBasis, MatsubaraSampling, TauSampling
+from sparse_ir.composite import CompositeBasis
 
 from admmsolver.objectivefunc import LeastSquares, ConstrainedLeastSquares, ObjectiveFunctionBase
 from admmsolver.objectivefunc import L2Regularizer, SemiPositiveDefinitePenalty, L1Regularizer
@@ -66,89 +68,101 @@ class AnaContBase:
     The spectral representation is given by
         G_ij(iv) = \int d\omga  K(iv, \omega) \rho_ij(\omega) + P(iv) c_{ij},
     where rho_{ij}(\omega) is a positive semi-definite matrix at a given \omega.
-    The second term of the RHS represents augmentation, such as a constant term in tau/frequency.
+    The second term of the RHS represents a constant term in tau/frequency (optionally).
 
-    In the time, the spectral representation reads
-        G_ij(\tau) = \int d\omega  K(\tau, \omega) \rho_ij(\omega) + P(\tau) c_{ij}.
+    We model this analytic-continuation problem as
+        G_{s,ij} = \sum_l U_{sl} * rho_{l,ij} + |\sum_l B_{tl} * rho_{l,ij}|_p^p +
+                        alpha * \sum_n C_{sn} x'_{n,ij},
+    where s denotes an imaginary time or an imaginary frequency, i and j denote spin orbitals,
+    alpha a regularization.
+    The expansion coefficients in IR are given by
+        rho_{l,ij} = \sum_m A_{l,m} x_{m,ij}.
+    The first and second terms of the RHS denote a normal component and a singular (augment) component, respectively.
+    The sum rules reads
+        \sum_l S_{k,l} rho_{l,ij} = T_{l,ij}.
 
-    For a given G^{input}, we minimize
-        |G^{input} - (G^{norm} + G^{singlar})|_^2 + (regulariation term),
-    where we dropped the indices for time/frequency and spin oribtals for simplicity.
-    G^{singular} represents an additonal contribution that is not complactly (or conveniently)
+    The singular component represents an additonal contribution that is not complactly (or conveniently)
     represented in IR (e.g., Hartree-Fock term, a delta peak at omega=0 for bosons).
-
-    The regularization term is defined...
-
     """
     def __init__(
             self,
-            basis: FiniteTempBasis,
+            #basis: Union[FiniteTempBasis, CompositeBasis],
             sampling: Union[TauSampling, MatsubaraSampling],
-            prj_to_IR: MatrixBase,
-            prj_to_reg: MatrixBase,
+            a: MatrixBase,
+            b: MatrixBase,
+            c: MatrixBase,
             reg_type: str = "L2",
-            singular_term_model: Optional[SingularTermModel] = None,
             sum_rule: Optional[Tuple[np.ndarray,np.ndarray]] = None,
         ) -> None:
         r"""
         basis:
-            IR basis
+            If basis is a CompositeBasis instance,
+
+        sampling:
+            Sampling object associated with a FiniteTempBasis instance or CompositeBasis instance,
+            If a CompositeBasis instance is given,
+            the first/second component is regarded as a normal/singular component.
 
         sampling:
             Sampling object
 
-        prj_to_IR:
-            Transformation matrix from parameters of the normal part to rho_l
+        a:
+            Transformation matrix `A` from the normal component `x` to IR
 
-        prj_to_reg:
-            Transformation matrix from parameters of the normal part to the space
+        b:
+            Transformation matrix `B` from the normal component `x` to the space
+            where L1/L2 regularation is imposed.
+
+        c:
+            Transformation matrix `C` to sampling real-frequencies
             where L1/L2 regularation is imposed on the fitting.
 
         reg_type: str
             `L1` or `L2`
 
-        prj_to_sum_rule:
-
-        singular_term_model:
-            Modeling the singular part
-
-        sum_rule: (a, b)
+        sum_rule: (S, T)
             Sum rule for the normal part.
-            a, b are 2D and 1D array, respectively
-            \sum_{l} a_{n,l} rho_{l,ij} = b_{n,ij}
+            S, T are 2D and 1D array, respectively
         """
-        assert prj_to_IR.shape[1] == prj_to_reg.shape[1], f"{prj_to_IR.shape} {prj_to_reg.shape}"
-        assert isinstance(sampling, TauSampling) or isinstance(sampling, MatsubaraSampling)
+        assert a.shape[1] == b.shape[1], f"{a.shape} {b.shape}"
         assert reg_type in ["L1", "L2"]
+        assert type(sampling) in [MatsubaraSampling, TauSampling]
 
-        self._beta = basis.beta
-        self._basis = basis
-
-        self._prj_to_IR = prj_to_IR
-        self._prj_to_reg = prj_to_reg
-        self._reg_type = reg_type
         self._sampling = sampling
-        self._singular_term_model = singular_term_model
-        self._smpl_w = oversample(np.hstack((-basis.wmax, basis.v[-1].roots(), basis.wmax)), 1)
+        self._basis = sampling.basis
+        assert isinstance(self._basis, FiniteTempBasis) or \
+            (isinstance(self._basis, CompositeBasis) and len(self._basis.bases) > 1)
+
+        self._beta = self._basis.beta
+        self._bases = self._basis.bases if isinstance(self._basis, CompositeBasis) else [self._basis]
+        self._is_augmented = isinstance(self._basis, CompositeBasis) and len(self._basis.bases) > 1
+
+        self._a = a
+        self._b = b
+        self._c = c
+        self._reg_type = reg_type
         self._sum_rule = sum_rule
 
+        wmax = self._bases[0].wmax
+        self._smpl_real_w = oversample(np.hstack((-wmax, self._bases[0].v[-1].roots(), wmax)), 1)
 
     def predict(
             self,
-            x: Tuple[np.ndarray, Optional[np.ndarray]]
+            x: np.ndarray
         ) -> np.ndarray:
         """
         Evaluate Green's function
 
         x:
-            (Parameters for normal part, parameters for singular part)
+            x or np.vstack((x, x'))
         """
-        rho_w = self._sampling.evaluate(self._prj_to_IR @ x[0], axis=0)
-        if self._singular_term_model is not None:
-            assert len(x) > 2
-            assert x[1] is not None
-            rho_w += self._singular_term_model.evaluate(x[1])
-        return rho_w
+        if self._is_augmented:
+            assert len(x) == 2
+            res = self._sampling.evaluate(np.vstack((self._a @ x[0], x[1])), axis=0)
+        else:
+            res = self._sampling.evaluate(self._a @ x, axis=0)
+        assert res.ndim == 3
+        return cast(np.ndarray, res)
 
 
     def solve(
@@ -158,7 +172,6 @@ class AnaContBase:
             niter: int = 10000,
             spd: bool = True,
             interval_update_mu: int =100,
-            initial_guess: Optional[np.ndarray] = None,
             rtol: float = 1e-10
         ):
         r"""
@@ -181,9 +194,6 @@ class AnaContBase:
         interval_update_mu:
             Interval for updating mu
 
-        initial_guess:
-            Initial guess
-
         rtol:
             Stopping condition.
             Check if all relative norms of all primal and dual residuals are smaller than rtol.
@@ -198,9 +208,9 @@ class AnaContBase:
 
         assert ginput.shape[0] == self._sampling.sampling_points.size
         nf = ginput.shape[1] # type: int
-        nparam_normal = self._prj_to_IR.shape[1]
+        nparam_normal = self._a.shape[1]
         nparam_w = nparam_normal//(nf**2)
-        nparam_singular = 0 if self._singular_term_model is None else nf**2
+        nparam_singular = 0 if not self._is_augmented else nf**2
         x_size = nparam_normal + nparam_singular
 
         # a: (N, M)
@@ -213,16 +223,14 @@ class AnaContBase:
             return np.hstack((a, y))
 
         ###
-        # Fitting matrix
-        #    Fitting matrix is a dense matrix
+        # Fitting matrix U * A
         ###
-        # Fitting parameters of normal component -> sampling points
-        K_ = self._sampling.matrix.a @ self._prj_to_IR.asmatrix() # type: np.ndarray
-        if self._singular_term_model is not None:
-            # K_: (nsmpl, nsmpl_w)
-            # new K: (nsmpl, nsmpl_w+1)
-            K_ = np.hstack((K_, self._singular_term_model.matrix[:,None])) # type: np.ndarray
-        K = PartialDiagonalMatrix(K_, (nf, nf))
+        if self._is_augmented:
+            ua_ = self._sampling.matrix.a @ \
+                block_diag(self._a.asmatrix(), np.identity(self._basis.bases[1].size)) # type: np.ndarray
+        else:
+            ua_ = self._sampling.matrix.a @ self._a.asmatrix() # type: np.ndarray
+        ua_full = PartialDiagonalMatrix(ua_, (nf, nf))
 
         ###
         # Various contraints V*x = W on the normal part
@@ -243,13 +251,11 @@ class AnaContBase:
         ###
         #  Regularization
         ###
-        assert isinstance(self._prj_to_reg, DenseMatrix)
-        reg_prj = None
-        if isinstance(self._prj_to_reg, DenseMatrix):
-            prj_reg_ext = self._prj_to_reg.asmatrix()
-            if self._singular_term_model is not None:
-                prj_reg_ext =  add_zero_column(prj_reg_ext)
-            reg_prj = PartialDiagonalMatrix(prj_reg_ext, (nf, nf))
+        assert isinstance(self._b, DenseMatrix)
+        b_ = self._b.asmatrix()
+        if self._is_augmented:
+            b_ =  add_zero_column(b_)
+        b_full = PartialDiagonalMatrix(b_, (nf, nf))
 
         # Optimizer
         equality_conditions = [
@@ -257,18 +263,19 @@ class AnaContBase:
         ] # type: list[EqualityCondition]
         if len(V) != 0:
             lstsq = ConstrainedLeastSquares(
-                1.0, K, ginput.ravel(),
+                1.0, ua_full, ginput.ravel(),
                 np.vstack(V),
                 np.hstack(W)
             )
         else:
-            lstsq = LeastSquares(1.0, K, ginput.ravel())
-        assert reg_prj is not None
-        reg = {"L2": L2Regularizer, "L1": L1Regularizer}[self._reg_type](alpha, reg_prj)
+            lstsq = LeastSquares(1.0, ua_full, ginput.ravel())
+
+        assert b_full is not None
+        reg = {"L2": L2Regularizer, "L1": L1Regularizer}[self._reg_type](alpha, b_full)
         terms = [lstsq, reg] # type: List[ObjectiveFunctionBase]
         if spd:
             # Semi-positive definite condition on normal component
-            nsmpl_w = self._smpl_w.size #type: int
+            nsmpl_w = self._smpl_real_w.size #type: int
             nn = SemiPositiveDefinitePenalty((nsmpl_w, nf, nf), 0)
             equality_conditions.append(
                     EqualityCondition(
@@ -278,16 +285,9 @@ class AnaContBase:
                     )
                 )
             terms.append(nn)
-        #print("debug")
-        #for i, f in enumerate(terms):
-            #print(i, f.size_x)
-        #for i, e in enumerate(equality_conditions):
-            #print(i, e.E1.shape, e.E2.shape)
+
         model = Model(terms, equality_conditions)
-        x0 = None
-        if initial_guess is not None:
-            x0 = len(terms) * [initial_guess]
-        opt = SimpleOptimizer(model, x0=x0)
+        opt = SimpleOptimizer(model)
 
         # Run
         opt.solve(niter, interval_update_mu=interval_update_mu, rtol=rtol)

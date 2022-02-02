@@ -41,4 +41,4 @@ ENV PYTHONPATH "/home/${NB_USER}/work/src:${PYTONPATH}"
 # for vscode
 RUN mkdir /home/${NB_USER}/work
 
-RUN pip3 install pytest mypy
+RUN pip3 install pytest mypy admmsolver
