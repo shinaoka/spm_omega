@@ -13,6 +13,7 @@ from admmsolver.optimizer import SimpleOptimizer, Model, EqualityCondition
 from admmsolver.matrix import identity, PartialDiagonalMatrix, ScaledIdentityMatrix, MatrixBase, DenseMatrix, DiagonalMatrix
 
 from .util import oversample
+from enum import Enum
 
 
 class SingularTermModel(object):
@@ -60,19 +61,18 @@ class MatsubaraZeroFrequencyPoleModel(SingularTermModel):
         super().__init__(sampling_points, matrix)
 
 
+class InputType(Enum):
+    TIME = 0
+    FREQ = 1
+
 
 class AnaContBase:
     r"""
     Base solver for analytic continuation with smooth conditions
 
-    The spectral representation is given by
-        G_ij(iv) = \int d\omga  K(iv, \omega) \rho_ij(\omega) + P(iv) c_{ij},
-    where rho_{ij}(\omega) is a positive semi-definite matrix at a given \omega.
-    The second term of the RHS represents a constant term in tau/frequency (optionally).
-
     We model this analytic-continuation problem as
-        G_{s,ij} = \sum_l U_{sl} * rho_{l,ij} + |\sum_l B_{tl} * rho_{l,ij}|_p^p +
-                        alpha * \sum_n C_{sn} x'_{n,ij},
+        G_{s,ij} = \sum_l U_{sl} * rho_{l,ij} + alpha * |\sum_l B_{tl} * rho_{l,ij}|_p^p +
+                        \sum_n C_{sn} x'_{n,ij},
     where s denotes an imaginary time or an imaginary frequency, i and j denote spin orbitals,
     alpha a regularization.
     The expansion coefficients in IR are given by
@@ -86,25 +86,22 @@ class AnaContBase:
     """
     def __init__(
             self,
-            #basis: Union[FiniteTempBasis, CompositeBasis],
             sampling: Union[TauSampling, MatsubaraSampling],
             a: MatrixBase,
             b: MatrixBase,
             c: MatrixBase,
+            smpl_real_w: np.ndarray,
             reg_type: str = "L2",
             sum_rule: Optional[Tuple[np.ndarray,np.ndarray]] = None,
         ) -> None:
         r"""
         basis:
-            If basis is a CompositeBasis instance,
+            If basis is a `CompositeBasis` instance,
 
         sampling:
-            Sampling object associated with a FiniteTempBasis instance or CompositeBasis instance,
+            Sampling object associated with a `FiniteTempBasis` instance or `CompositeBasis` instance,
             If a CompositeBasis instance is given,
             the first/second component is regarded as a normal/singular component.
-
-        sampling:
-            Sampling object
 
         a:
             Transformation matrix `A` from the normal component `x` to IR
@@ -114,8 +111,11 @@ class AnaContBase:
             where L1/L2 regularation is imposed.
 
         c:
-            Transformation matrix `C` to sampling real-frequencies
-            where L1/L2 regularation is imposed on the fitting.
+            Transformation matrix `C` from the normal component `x` to the space
+            where the SPD condition is imposed. This matrix must be consistent with `smpl_reqal_w`.
+
+        smpl_real_w:
+            Real sampling frequencies
 
         reg_type: str
             `L1` or `L2`
@@ -127,24 +127,23 @@ class AnaContBase:
         assert a.shape[1] == b.shape[1], f"{a.shape} {b.shape}"
         assert reg_type in ["L1", "L2"]
         assert type(sampling) in [MatsubaraSampling, TauSampling]
+        assert smpl_real_w.ndim == 1
 
         self._sampling = sampling
         self._basis = sampling.basis
         assert isinstance(self._basis, FiniteTempBasis) or \
             (isinstance(self._basis, CompositeBasis) and len(self._basis.bases) > 1)
 
-        self._beta = self._basis.beta
         self._bases = self._basis.bases if isinstance(self._basis, CompositeBasis) else [self._basis]
-        self._is_augmented = isinstance(self._basis, CompositeBasis) and len(self._basis.bases) > 1
+        self._beta = cast(float, self._bases[0]) # type: float
+        self._is_augmented = isinstance(self._basis, CompositeBasis) and len(self._basis.bases) > 1 # type: bool
 
         self._a = a
         self._b = b
         self._c = c
         self._reg_type = reg_type
         self._sum_rule = sum_rule
-
-        wmax = self._bases[0].wmax
-        self._smpl_real_w = oversample(np.hstack((-wmax, self._bases[0].v[-1].roots(), wmax)), 1)
+        self._smpl_real_w = smpl_real_w
 
     def predict(
             self,
@@ -280,7 +279,7 @@ class AnaContBase:
             equality_conditions.append(
                     EqualityCondition(
                         0, 2,
-                        ScaledIdentityMatrix((nsmpl_w*nf**2, x_size), 1.0),
+                        PartialDiagonalMatrix(self._c, (nf, nf)),
                         ScaledIdentityMatrix(nsmpl_w*nf**2, 1.0)
                     )
                 )
