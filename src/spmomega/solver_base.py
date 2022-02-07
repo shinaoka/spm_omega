@@ -71,10 +71,14 @@ class AnaContBase:
     Base solver for analytic continuation with smooth conditions
 
     We model this analytic-continuation problem as
-        G_{s,ij} = \sum_l U_{sl} * rho_{l,ij} + alpha * |\sum_l B_{tl} * rho_{l,ij}|_p^p +
+        G_{s,ij} = - \sum_l S_l U_{sl} * rho_{l,ij} + alpha * |\sum_l B_{tl} * rho_{l,ij}|_p^p +
                         \sum_n C_{sn} x'_{n,ij},
-    where s denotes an imaginary time or an imaginary frequency, i and j denote spin orbitals,
-    alpha a regularization.
+    where
+        s: an imaginary time or an imaginary frequency,
+        i and j: spin orbitals,
+        alpha: a regularization,
+        S_l: singular values.
+
     The expansion coefficients in IR are given by
         rho_{l,ij} = \sum_m A_{l,m} x_{m,ij}.
     The first and second terms of the RHS denote a normal component and a singular (augment) component, respectively.
@@ -90,7 +94,6 @@ class AnaContBase:
             a: MatrixBase,
             b: MatrixBase,
             c: MatrixBase,
-            smpl_real_w: np.ndarray,
             reg_type: str = "L2",
             sum_rule: Optional[Tuple[np.ndarray,np.ndarray]] = None,
         ) -> None:
@@ -104,7 +107,7 @@ class AnaContBase:
             the first/second component is regarded as a normal/singular component.
 
         a:
-            Transformation matrix `A` from the normal component `x` to IR
+            Transformation matrix `A` from the normal component `x` to rho_l
 
         b:
             Transformation matrix `B` from the normal component `x` to the space
@@ -114,20 +117,16 @@ class AnaContBase:
             Transformation matrix `C` from the normal component `x` to the space
             where the SPD condition is imposed. This matrix must be consistent with `smpl_reqal_w`.
 
-        smpl_real_w:
-            Real sampling frequencies
-
         reg_type: str
             `L1` or `L2`
 
         sum_rule: (S, T)
-            Sum rule for the normal part.
+            Sum rule for the normal component.
             S, T are 2D and 1D array, respectively
         """
         assert a.shape[1] == b.shape[1], f"{a.shape} {b.shape}"
         assert reg_type in ["L1", "L2"]
         assert type(sampling) in [MatsubaraSampling, TauSampling]
-        assert smpl_real_w.ndim == 1
 
         self._sampling = sampling
         self._basis = sampling.basis
@@ -143,7 +142,6 @@ class AnaContBase:
         self._c = c
         self._reg_type = reg_type
         self._sum_rule = sum_rule
-        self._smpl_real_w = smpl_real_w
 
     def predict(
             self,
@@ -188,7 +186,7 @@ class AnaContBase:
             Max number of iterations
 
         spd:
-            Use semi-positive-definite condition for normal part
+            Use semi-positive-definite condition for normal component
 
         interval_update_mu:
             Interval for updating mu
@@ -207,32 +205,38 @@ class AnaContBase:
 
         assert ginput.shape[0] == self._sampling.sampling_points.size
         nf = ginput.shape[1] # type: int
-        nparam_normal = self._a.shape[1]
-        nparam_w = nparam_normal//(nf**2)
+        nparam_normal = self._a.shape[1] * nf**2
         nparam_singular = 0 if not self._is_augmented else nf**2
         x_size = nparam_normal + nparam_singular
 
-        # a: (N, M)
-        # y: (N, 1)
-        # np.hstack((a,y)): (N, M+1)
-        def add_zero_column(a):
-            N = a.shape[0]
-            y = np.zeros((N, 1))
-            print("debug", a.shape, y.shape)
-            return np.hstack((a, y))
 
         ###
-        # Fitting matrix U * A
+        # Fitting matrix
+        # Let (T0, T1) = self._sampling.matrix.a.
+        #
+        # Normal component:
+        #  g_smpl = - (T0 @ S @ A0) x
+        #
+        # Singular component:
+        #  g_smpl = T1 x'
         ###
+        T0 = self._sampling.matrix.a[:, 0:self._bases[0].size]
+        T0S = T0.copy()
+        T0S[:, 0:self._bases[0].size] *= -self._bases[0].s[None,:]
+        T0SA0 = T0S @ self._a.asmatrix() # type: np.ndarray
         if self._is_augmented:
-            ua_ = self._sampling.matrix.a @ \
-                block_diag(self._a.asmatrix(), np.identity(self._basis.bases[1].size)) # type: np.ndarray
+            T1 = self._sampling.matrix.a[:, self._bases[0].size:]
+            tmp = np.hstack((T0SA0, T1))
+            #sua_ = self._sampling.matrix.a @ \
+                #block_diag(self._a.asmatrix(), np.identity(self._basis.bases[1].size)) # type: np.ndarray
+            #sua_ = su_ @ self._a.asmatrix() # type: np.ndarray
+            #sua__ = su_ @ self._a.asmatrix() # type: np.ndarray
+            sua_full = PartialDiagonalMatrix(tmp, (nf, nf))
         else:
-            ua_ = self._sampling.matrix.a @ self._a.asmatrix() # type: np.ndarray
-        ua_full = PartialDiagonalMatrix(ua_, (nf, nf))
+            sua_full = PartialDiagonalMatrix(T0SA0, (nf, nf))
 
         ###
-        # Various contraints V*x = W on the normal part
+        # Various contraints V*x = W on the normal component
         ###
         V = [] # List[np.ndarray]
         W = [] # List[np.ndarray]
@@ -245,7 +249,7 @@ class AnaContBase:
             W.append(b)
 
         # Extend the shape of V to include singular component
-        V = list(map(add_zero_column, V))
+        V = list(map(_add_zero_column, V))
 
         ###
         #  Regularization
@@ -253,7 +257,7 @@ class AnaContBase:
         assert isinstance(self._b, DenseMatrix)
         b_ = self._b.asmatrix()
         if self._is_augmented:
-            b_ =  add_zero_column(b_)
+            b_ =  _add_zero_column(b_)
         b_full = PartialDiagonalMatrix(b_, (nf, nf))
 
         # Optimizer
@@ -262,25 +266,26 @@ class AnaContBase:
         ] # type: list[EqualityCondition]
         if len(V) != 0:
             lstsq = ConstrainedLeastSquares(
-                1.0, ua_full, ginput.ravel(),
+                1.0, sua_full, ginput.ravel(),
                 np.vstack(V),
                 np.hstack(W)
             )
         else:
-            lstsq = LeastSquares(1.0, ua_full, ginput.ravel())
+            lstsq = LeastSquares(1.0, sua_full, ginput.ravel())
 
         assert b_full is not None
         reg = {"L2": L2Regularizer, "L1": L1Regularizer}[self._reg_type](alpha, b_full)
         terms = [lstsq, reg] # type: List[ObjectiveFunctionBase]
         if spd:
             # Semi-positive definite condition on normal component
-            nsmpl_w = self._smpl_real_w.size #type: int
+            nsmpl_w = self._c.shape[0]
             nn = SemiPositiveDefinitePenalty((nsmpl_w, nf, nf), 0)
+            c_ext = _add_zero_column(self._c) if self._is_augmented else self._c
             equality_conditions.append(
                     EqualityCondition(
                         0, 2,
-                        PartialDiagonalMatrix(self._c, (nf, nf)),
-                        ScaledIdentityMatrix(nsmpl_w*nf**2, 1.0)
+                        PartialDiagonalMatrix(c_ext, (nf, nf)),
+                        PartialDiagonalMatrix(ScaledIdentityMatrix(nsmpl_w, 1.0), (nf, nf)),
                     )
                 )
             terms.append(nn)
@@ -298,3 +303,19 @@ class AnaContBase:
 
         x = opt.x[0].reshape((-1,) + ginput.shape[1:])
         return x, info
+
+
+# a: (N, M)
+# y: (N, 1)
+# np.hstack((a,y)): (N, M+1)
+def _add_zero_column(a: Union[np.ndarray, MatrixBase]):
+    if isinstance(a, np.ndarray):
+        assert a.ndim == 2
+        N = a.shape[0]
+        y = np.zeros((N, 1))
+        return np.hstack((a, y))
+    elif isinstance(a, ScaledIdentityMatrix):
+        diagonals = np.full(min(*a.shape), a.coeff)
+        return DiagonalMatrix(diagonals, shape=(a.shape[0], a.shape[1]+1))
+    else:
+        raise RuntimeError(f"Invalid type{type(a)}!")

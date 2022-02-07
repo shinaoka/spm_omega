@@ -4,8 +4,10 @@ import numpy as np
 from typing import Optional, Union, Tuple, Dict, List
 
 from sparse_ir import FiniteTempBasis, MatsubaraSampling, TauSampling, KernelFFlat
+from sparse_ir.composite import CompositeBasis
+from sparse_ir.augment import LegendreBasis, MatsubaraConstBasis
 
-from admmsolver.matrix import DenseMatrix
+from admmsolver.matrix import DenseMatrix, ScaledIdentityMatrix
 from admmsolver.util import smooth_regularizer_coeff
 
 from .solver_base import AnaContBase, SingularTermModel, InputType
@@ -25,7 +27,7 @@ class AnaContSmooth(object):
             sampling_points: np.ndarray,
             oversampling: int = 1,
             moment: Optional[np.ndarray] = None,
-            singular_basis: Union[None, str] = None
+            singular_term: Union[None, str] = None
         ) -> None:
         r"""
         To be written...
@@ -49,32 +51,43 @@ class AnaContSmooth(object):
         # Fitting parameters for the normal component (sampling points in the real-frequency space)
         self._smpl_real_w = oversample(np.hstack((-wmax, basis.v[-1].roots(), wmax)), oversampling)
 
-        sampling = {
-            InputType.FREQ: MatsubaraSampling,
-            InputType.TIME: TauSampling,
-        }[input_type](basis, sampling_points)
 
-        # From sampling points in the real frequency space to IR (using linear interpolation)
+        # From rho(omega_i) to rho_l (using linear interpolation)
         a = prj_w_to_l(basis, self._smpl_real_w, 10)
 
-        # From sampling points in the real frequency space to the integral of second derivative of rho(omega)
+        # From rho(omea_i) to rho''(omega) [Check uniform mesh]
         b = smooth_regularizer_coeff(self._smpl_real_w) # type: np.ndarray
 
-        # From sampling points in the real frequency space to the integral of rho(omega)
+        # From rho(omega_i) to the integral of rho(omega)
         sum_rule = None
         if moment is not None:
             assert moment.ndim == 2 and moment.shape[0] == moment.shape[1]
             prj_sum_ = basis.s * (basis.u(0) + basis.u(basis.beta))
             sum_rule = (prj_sum_ @ a, moment)
 
-        if singular_basis is not None:
-            pass
+        tot_basis = None
+        if singular_term is None:
+            tot_basis = basis
+        elif singular_term == "omega0":
+            assert statistics == "B"
+            tot_basis = CompositeBasis([basis, LegendreBasis(statistics, beta, 1)])
+        elif singular_term == "HF":
+            tot_basis = CompositeBasis([basis, MatsubaraConstBasis(statistics, beta, 1.0)])
+        else:
+            raise RuntimeError(f"Invalid singular_term {singular_term}")
+
+        sampling = {
+            InputType.FREQ: MatsubaraSampling,
+            InputType.TIME: TauSampling,
+        }[input_type](tot_basis, sampling_points)
+
+        c = ScaledIdentityMatrix(self._smpl_real_w.size, 1.0)
 
         self._solver = AnaContBase(
             sampling,
             DenseMatrix(a),
             DenseMatrix(b),
-            smpl_real_w = self._smpl_real_w,
+            c,
             sum_rule=sum_rule)
 
     @property

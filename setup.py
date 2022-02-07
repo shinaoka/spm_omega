@@ -54,7 +54,7 @@ setup(
         'numpy',
         'scipy',
         'sparse_ir',
-        'admmsolver>=0.5',
+        'admmsolver>=0.6',
         'xprec'
     ],
     extras_require={

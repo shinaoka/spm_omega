@@ -64,13 +64,13 @@ def test_SpM(rho):
         "F", beta, eps=1e-12)
     smpl_matsu = MatsubaraSampling(basis, vsample)
     smpl_tau = TauSampling(basis, tausample)
-    
+
     # Compute exact rho_l, g_l, g_iv, g_tau
     rho_test = rho(np.linspace(-1,1,100))
     rho_l = basis.v.overlap(rho, axis=0)
     rho_l = rho_l.reshape((basis.size,) + rho_test.shape[1:])
     g_l = -basis.s[:,None,None] * rho_l
-    
+
     # From Matsubara
     g_iv = smpl_matsu.evaluate(g_l, axis=0)
     solver = SpM(beta, "F", wmax, vsample=vsample)
