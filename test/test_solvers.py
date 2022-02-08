@@ -40,19 +40,22 @@ def get_singular_term_matsubara(type: Optional[str], ginput: np.ndarray):
     return np.zeros_like(ginput)
 
 
-@pytest.mark.parametrize("rho", [(rho_single_orb), (rho_two_orb)])
-#@pytest.mark.parametrize("rho", [(rho_single_orb)])
-@pytest.mark.parametrize("augment", [None, "HF"])
-#@pytest.mark.parametrize("augment", [None])
-def test_smooth(rho, augment):
+@pytest.mark.parametrize("stat", ["B"])
+#@pytest.mark.parametrize("rho", [(rho_single_orb), (rho_two_orb)])
+@pytest.mark.parametrize("rho", [(rho_single_orb)])
+#@pytest.mark.parametrize("augment", [None, "HF"])
+@pytest.mark.parametrize("augment", [None])
+def test_smooth(stat, rho, augment):
     wmax = 10.0
     beta = 100.0
     alpha = 1e-10
     niv = 1000
-    vsample = 2*np.arange(-niv, niv)+1
+    shift = {"F": 1, "B": 0}[stat]
+    vsample = 2*np.arange(-niv, niv) + shift
     tausample = np.linspace(0, beta, 2*niv)
 
-    basis = FiniteTempBasis("F", beta, wmax, eps=1e-12)
+    basis = FiniteTempBasis(stat, beta, wmax, eps=1e-12)
+    assert False
     smpl_matsu = MatsubaraSampling(basis, vsample)
     smpl_tau = TauSampling(basis, tausample)
 
@@ -66,8 +69,8 @@ def test_smooth(rho, augment):
     g_iv = smpl_matsu.evaluate(g_l, axis=0)
     g_iv += get_singular_term_matsubara(augment, g_iv)
     solver = AnaContSmooth(
-        beta, wmax, "F", "freq", vsample, singular_term=augment)
-    rho_w, info = solver.solve(g_iv, alpha, niter=1000, spd=True)
+        beta, wmax, stat, "freq", vsample, singular_term=augment)
+    rho_w, info = solver.solve(g_iv, alpha, niter=1000, spd=False)
     print("info", info["lstsq"])
     print("# ", rho_w[-1,0,0].real)
     for x_, y_ in zip(
@@ -79,6 +82,6 @@ def test_smooth(rho, augment):
     # From tau
     if augment != "HF":
         gtau = smpl_tau.evaluate(g_l, axis=0)
-        solver = AnaContSmooth(beta, wmax, "F", "time", tausample)
+        solver = AnaContSmooth(beta, wmax, stat, "time", tausample)
         rho_w, _ = solver.solve(gtau, alpha, niter=1000)
         np.testing.assert_allclose(rho_w, rho(solver.smpl_real_w), rtol=0, atol=0.05)
