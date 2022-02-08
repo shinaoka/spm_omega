@@ -26,25 +26,23 @@ def rho_two_orb(omega):
     return np.einsum('ji,wjk,kl->wil', rot_mat, rho_omega, rot_mat)
 
 
-def get_augmentation_freq(type: str, ginput: np.ndarray):
-    if type == "HF":
-        # DEBUG
-        #return np.ones_like(ginput)
-        return np.zeros_like(ginput)
-    elif type == "omega0":
-        pass
+#def get_augmentation_freq(type: str, ginput: np.ndarray):
+    #if type == "HF":
+        ## DEBUG
+        ##return np.ones_like(ginput)
+        #return np.zeros_like(ginput)
+    #elif type == "omega0":
+        #pass
 
 def get_singular_term_matsubara(type: Optional[str], ginput: np.ndarray):
     if type == "HF":
-        #return np.ones_like(ginput)
-        # DEBUG
-        return np.zeros_like(ginput)
+        return np.ones_like(ginput)
     return np.zeros_like(ginput)
 
 
-#@pytest.mark.parametrize("rho", [(rho_single_orb), (rho_two_orb)])
-@pytest.mark.parametrize("rho", [(rho_single_orb)])
-@pytest.mark.parametrize("augment", ["HF"])
+@pytest.mark.parametrize("rho", [(rho_single_orb), (rho_two_orb)])
+#@pytest.mark.parametrize("rho", [(rho_single_orb)])
+@pytest.mark.parametrize("augment", [None, "HF"])
 #@pytest.mark.parametrize("augment", [None])
 def test_smooth(rho, augment):
     wmax = 10.0
@@ -68,7 +66,7 @@ def test_smooth(rho, augment):
     g_iv = smpl_matsu.evaluate(g_l, axis=0)
     g_iv += get_singular_term_matsubara(augment, g_iv)
     solver = AnaContSmooth(
-        beta, wmax, "F", InputType.FREQ, vsample, singular_term=augment)
+        beta, wmax, "F", "freq", vsample, singular_term=augment)
     rho_w, info = solver.solve(g_iv, alpha, niter=1000, spd=True)
     print("info", info["lstsq"])
     print("# ", rho_w[-1,0,0].real)
@@ -81,6 +79,6 @@ def test_smooth(rho, augment):
     # From tau
     if augment != "HF":
         gtau = smpl_tau.evaluate(g_l, axis=0)
-        solver = AnaContSmooth(beta, wmax, "F", InputType.TIME, tausample)
+        solver = AnaContSmooth(beta, wmax, "F", "time", tausample)
         rho_w, _ = solver.solve(gtau, alpha, niter=1000)
         np.testing.assert_allclose(rho_w, rho(solver.smpl_real_w), rtol=0, atol=0.05)

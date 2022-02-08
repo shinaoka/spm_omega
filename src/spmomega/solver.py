@@ -81,7 +81,7 @@ class SpM:
             used for imposing semi-positive definite conditions.
             The number of mesh points is increased by the factor of 2^n_oversample.
         """
-        basis = FiniteTempBasis(KernelFFlat(beta*wmax), statistics, beta, eps)
+        basis = FiniteTempBasis(statistics, beta, wmax, eps=eps, kernel=KernelFFlat(beta*wmax))
         self._basis = basis
         self._beta = basis.beta
         self._vsample = None

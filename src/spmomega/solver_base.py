@@ -1,64 +1,16 @@
 # Copyright (C) 2021-2022 Hiroshi Shinaoka and others
 # SPDX-License-Identifier: MIT
 import numpy as np
-from scipy.linalg import block_diag
-from typing import Optional, Union, Tuple, Dict, List, cast, Sequence
+from typing import Optional, Union, Tuple, List, cast, Sequence
 
-from sparse_ir import FiniteTempBasis, MatsubaraSampling, TauSampling
-from sparse_ir.composite import CompositeBasis
+from sparse_ir import MatsubaraSampling, TauSampling
 
 from admmsolver.objectivefunc import LeastSquares, ConstrainedLeastSquares, ObjectiveFunctionBase
 from admmsolver.objectivefunc import L2Regularizer, SemiPositiveDefinitePenalty, L1Regularizer
 from admmsolver.optimizer import SimpleOptimizer, Model, EqualityCondition
 from admmsolver.matrix import identity, PartialDiagonalMatrix, ScaledIdentityMatrix, MatrixBase, DenseMatrix, DiagonalMatrix
 
-from .util import oversample
 from enum import Enum
-
-
-class SingularTermModel(object):
-    r"""
-    Green's function may contain contributions that are not compactly
-    representated by IR basis such as a Hartree-Fock term or
-    a zero-energy-model excitation for bosons.
-    SingularTermModel is a base class for models that models such terms.
-    """
-    def __init__(self, sampling_points: np.ndarray, matrix: np.ndarray) -> None:
-        assert all(sampling_points[:-1] < sampling_points[1:])
-        assert matrix.ndim == sampling_points.ndim == 1
-        assert matrix.size == sampling_points.size
-
-        self._sampling_points = sampling_points
-        self._matrix = matrix
-
-    def evaluate(self, coeff: np.ndarray)->np.ndarray:
-        assert isinstance(coeff, np.ndarray) and coeff.ndim == 2
-        return np.einsum('w,ij->wij', self._matrix, coeff)
-
-    @property
-    def matrix(self)->np.ndarray:
-        return self._matrix
-
-
-class MatsubaraHartreeFockModel(SingularTermModel):
-    """
-    Modeling a Hartree-Fock term in frequency
-    """
-    def __init__(self, sampling_points: np.ndarray) -> None:
-        super().__init__(
-                sampling_points,
-                np.ones((self._sampling_points.size,))
-            )
-
-class MatsubaraZeroFrequencyPoleModel(SingularTermModel):
-    r"""
-    Modeling a pole at omega = 0, rho(omega) = coeff * \delta(\omega)
-    """
-    def __init__(self, sampling_points: np.ndarray) -> None:
-        matrix = np.zeros(self._sampling_points.size)
-        zero_pos = np.where(sampling_points==0)[0][0]
-        matrix[zero_pos] = 1
-        super().__init__(sampling_points, matrix)
 
 
 class InputType(Enum):
@@ -68,7 +20,7 @@ class InputType(Enum):
 
 class AnaContBase:
     r"""
-    Base solver for analytic continuation with smooth conditions
+    Base solver for analytic continuation
 
     We model this analytic-continuation problem as
         G_{s,ij} = - \sum_l S_l U_{sl} * rho_{l,ij} + alpha * |\sum_l B_{tl} * rho_{l,ij}|_p^p +
@@ -78,10 +30,10 @@ class AnaContBase:
         i and j: spin orbitals,
         alpha: a regularization,
         S_l: singular values.
+    The first and second terms of the RHS denote a normal component and a singular (augment) component, respectively.
 
     The expansion coefficients in IR are given by
         rho_{l,ij} = \sum_m A_{l,m} x_{m,ij}.
-    The first and second terms of the RHS denote a normal component and a singular (augment) component, respectively.
     The sum rules reads
         \sum_l S_{k,l} rho_{l,ij} = T_{l,ij}.
 

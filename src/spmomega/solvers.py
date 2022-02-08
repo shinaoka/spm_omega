@@ -4,13 +4,12 @@ import numpy as np
 from typing import Optional, Union, Tuple, Dict, List
 
 from sparse_ir import FiniteTempBasis, MatsubaraSampling, TauSampling, KernelFFlat
-from sparse_ir.composite import CompositeBasis
 from sparse_ir.augment import LegendreBasis, MatsubaraConstBasis
 
 from admmsolver.matrix import DenseMatrix, ScaledIdentityMatrix
 from admmsolver.util import smooth_regularizer_coeff
 
-from .solver_base import AnaContBase, SingularTermModel, InputType
+from .solver_base import AnaContBase, InputType
 from .util import oversample, prj_w_to_l
 
 
@@ -23,7 +22,7 @@ class AnaContSmooth(object):
             beta: float,
             wmax: float,
             statistics: str,
-            input_type: InputType,
+            input_type: Union[str, InputType],
             sampling_points: np.ndarray,
             oversampling: int = 1,
             moment: Optional[np.ndarray] = None,
@@ -39,7 +38,9 @@ class AnaContSmooth(object):
         """
         assert isinstance(beta, float)
         assert isinstance(wmax, float)
-        assert isinstance(input_type, InputType)
+        assert type(input_type) in [InputType, str]
+        if isinstance(input_type, str):
+            input_type = {"time": InputType.TIME, "freq": InputType.FREQ}[input_type]
         assert isinstance(sampling_points, np.ndarray) and \
             sampling_points.ndim == 1
         assert isinstance(oversampling, int)
@@ -65,13 +66,14 @@ class AnaContSmooth(object):
             sum_rule = (prj_sum_ @ a, moment)
 
         bases = [basis] #type: List[Union[FiniteTempBasis, LegendreBasis, MatsubaraConstBasis]]
-        if singular_term == "omega0":
-            assert statistics == "B"
-            bases.append(LegendreBasis(statistics, beta, 1))
-        elif singular_term == "HF":
-            bases.append(MatsubaraConstBasis(statistics, beta, 1.0))
-        else:
-            raise RuntimeError(f"Invalid singular_term {singular_term}")
+        if singular_term is not None:
+            if singular_term == "omega0":
+                assert statistics == "B"
+                bases.append(LegendreBasis(statistics, beta, 1))
+            elif singular_term == "HF":
+                bases.append(MatsubaraConstBasis(statistics, beta, 1.0))
+            else:
+                raise RuntimeError(f"Invalid singular_term {singular_term}")
 
         sampling = []
         smpl_cls = {InputType.FREQ: MatsubaraSampling, InputType.TIME: TauSampling}[input_type]
