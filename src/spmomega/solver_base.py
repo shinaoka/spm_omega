@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 import numpy as np
 from scipy.linalg import block_diag
-from typing import Optional, Union, Tuple, Dict, List, cast
+from typing import Optional, Union, Tuple, Dict, List, cast, Sequence
 
 from sparse_ir import FiniteTempBasis, MatsubaraSampling, TauSampling
 from sparse_ir.composite import CompositeBasis
@@ -90,7 +90,7 @@ class AnaContBase:
     """
     def __init__(
             self,
-            sampling: Union[TauSampling, MatsubaraSampling],
+            sampling: Sequence[Union[TauSampling, MatsubaraSampling]],
             a: MatrixBase,
             b: MatrixBase,
             c: MatrixBase,
@@ -98,13 +98,9 @@ class AnaContBase:
             sum_rule: Optional[Tuple[np.ndarray,np.ndarray]] = None,
         ) -> None:
         r"""
-        basis:
-            If basis is a `CompositeBasis` instance,
-
         sampling:
-            Sampling object associated with a `FiniteTempBasis` instance or `CompositeBasis` instance,
-            If a CompositeBasis instance is given,
-            the first/second component is regarded as a normal/singular component.
+            A sequence of sampling objects.
+            The first/second component is Regarded as a normal/singular component.
 
         a:
             Transformation matrix `A` from the normal component `x` to rho_l
@@ -126,40 +122,20 @@ class AnaContBase:
         """
         assert a.shape[1] == b.shape[1], f"{a.shape} {b.shape}"
         assert reg_type in ["L1", "L2"]
-        assert type(sampling) in [MatsubaraSampling, TauSampling]
+        assert len(sampling) == 1 or len(sampling) == 2
+        assert np.unique([s_.sampling_points.size for s_ in sampling]).size == 1
 
         self._sampling = sampling
-        self._basis = sampling.basis
-        assert isinstance(self._basis, FiniteTempBasis) or \
-            (isinstance(self._basis, CompositeBasis) and len(self._basis.bases) > 1)
 
-        self._bases = self._basis.bases if isinstance(self._basis, CompositeBasis) else [self._basis]
+        self._bases = [s.basis for s in sampling]
         self._beta = cast(float, self._bases[0]) # type: float
-        self._is_augmented = isinstance(self._basis, CompositeBasis) and len(self._basis.bases) > 1 # type: bool
+        self._is_augmented = len(sampling) > 1
 
         self._a = a
         self._b = b
         self._c = c
         self._reg_type = reg_type
         self._sum_rule = sum_rule
-
-    def predict(
-            self,
-            x: np.ndarray
-        ) -> np.ndarray:
-        """
-        Evaluate Green's function
-
-        x:
-            x or np.vstack((x, x'))
-        """
-        if self._is_augmented:
-            assert len(x) == 2
-            res = self._sampling.evaluate(np.vstack((self._a @ x[0], x[1])), axis=0)
-        else:
-            res = self._sampling.evaluate(self._a @ x, axis=0)
-        assert res.ndim == 3
-        return cast(np.ndarray, res)
 
 
     def solve(
@@ -196,19 +172,17 @@ class AnaContBase:
             Check if all relative norms of all primal and dual residuals are smaller than rtol.
         """
         assert ginput.ndim == 3
-        assert ginput.shape[0] == self._sampling.sampling_points.size, \
+        assert ginput.shape[0] == self._sampling[0].sampling_points.size, \
             "shape of ginput is not consistent with sampling frequencies!"
         assert ginput.shape[1] == ginput.shape[2], \
             "Invalid shape of ginput"
         if isinstance(self._sum_rule, np.ndarray):
             assert ginput.shape[1:] == self._sum_rule.shape
 
-        assert ginput.shape[0] == self._sampling.sampling_points.size
         nf = ginput.shape[1] # type: int
         nparam_normal = self._a.shape[1] * nf**2
         nparam_singular = 0 if not self._is_augmented else nf**2
         x_size = nparam_normal + nparam_singular
-
 
         ###
         # Fitting matrix
@@ -220,17 +194,13 @@ class AnaContBase:
         # Singular component:
         #  g_smpl = T1 x'
         ###
-        T0 = self._sampling.matrix.a[:, 0:self._bases[0].size]
+        T0 = self._sampling[0].matrix.a
         T0S = T0.copy()
         T0S[:, 0:self._bases[0].size] *= -self._bases[0].s[None,:]
         T0SA0 = T0S @ self._a.asmatrix() # type: np.ndarray
         if self._is_augmented:
-            T1 = self._sampling.matrix.a[:, self._bases[0].size:]
+            T1 = self._sampling[1].matrix.a
             tmp = np.hstack((T0SA0, T1))
-            #sua_ = self._sampling.matrix.a @ \
-                #block_diag(self._a.asmatrix(), np.identity(self._basis.bases[1].size)) # type: np.ndarray
-            #sua_ = su_ @ self._a.asmatrix() # type: np.ndarray
-            #sua__ = su_ @ self._a.asmatrix() # type: np.ndarray
             sua_full = PartialDiagonalMatrix(tmp, (nf, nf))
         else:
             sua_full = PartialDiagonalMatrix(T0SA0, (nf, nf))

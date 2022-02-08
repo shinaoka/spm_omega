@@ -51,7 +51,6 @@ class AnaContSmooth(object):
         # Fitting parameters for the normal component (sampling points in the real-frequency space)
         self._smpl_real_w = oversample(np.hstack((-wmax, basis.v[-1].roots(), wmax)), oversampling)
 
-
         # From rho(omega_i) to rho_l (using linear interpolation)
         a = prj_w_to_l(basis, self._smpl_real_w, 10)
 
@@ -65,21 +64,20 @@ class AnaContSmooth(object):
             prj_sum_ = basis.s * (basis.u(0) + basis.u(basis.beta))
             sum_rule = (prj_sum_ @ a, moment)
 
-        tot_basis = None
-        if singular_term is None:
-            tot_basis = basis
-        elif singular_term == "omega0":
+        bases = [basis] #type: List[Union[FiniteTempBasis, LegendreBasis, MatsubaraConstBasis]]
+        if singular_term == "omega0":
             assert statistics == "B"
-            tot_basis = CompositeBasis([basis, LegendreBasis(statistics, beta, 1)])
+            bases.append(LegendreBasis(statistics, beta, 1))
         elif singular_term == "HF":
-            tot_basis = CompositeBasis([basis, MatsubaraConstBasis(statistics, beta, 1.0)])
+            bases.append(MatsubaraConstBasis(statistics, beta, 1.0))
         else:
             raise RuntimeError(f"Invalid singular_term {singular_term}")
 
-        sampling = {
-            InputType.FREQ: MatsubaraSampling,
-            InputType.TIME: TauSampling,
-        }[input_type](tot_basis, sampling_points)
+        sampling = []
+        smpl_cls = {InputType.FREQ: MatsubaraSampling, InputType.TIME: TauSampling}[input_type]
+        for b_ in bases:
+            print(b_, sampling_points)
+            sampling.append(smpl_cls(b_, sampling_points))
 
         c = ScaledIdentityMatrix(self._smpl_real_w.size, 1.0)
 
@@ -94,11 +92,11 @@ class AnaContSmooth(object):
     def smpl_real_w(self):
         return self._smpl_real_w
 
-    def predict(
-            self,
-            x: np.ndarray
-        ) -> np.ndarray:
-        return self._solver.predict(x)
+    #def predict(
+            #self,
+            #x: np.ndarray
+        #) -> np.ndarray:
+        #return self._solver.predict(x)
 
     def solve(
             self,
