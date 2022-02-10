@@ -1,5 +1,5 @@
-from spmomega.solver import _prj_w_to_l, SpMSmooth, SpM
-from spmomega.solvers import AnaContSmooth
+from spm_omega.solver import _prj_w_to_l, SpMSmooth, SpM
+from spm_omega.solvers import AnaContSmooth
 
 import numpy as np
 from sparse_ir import FiniteTempBasis, KernelFFlat, MatsubaraSampling, TauSampling

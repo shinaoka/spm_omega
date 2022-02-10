@@ -1,8 +1,8 @@
 from typing import Optional
 
-from spmomega.solver import _prj_w_to_l, SpMSmooth, SpM
-from spmomega.solver_base import InputType
-from spmomega.solvers import AnaContSmooth
+from spm_omega.solver import _prj_w_to_l, SpMSmooth, SpM
+from spm_omega.solver_base import InputType
+from spm_omega.solvers import AnaContSmooth
 
 import numpy as np
 from sparse_ir import FiniteTempBasis, KernelFFlat, MatsubaraSampling, TauSampling
@@ -54,8 +54,7 @@ def test_smooth(stat, rho, augment):
     vsample = 2*np.arange(-niv, niv) + shift
     tausample = np.linspace(0, beta, 2*niv)
 
-    basis = FiniteTempBasis(stat, beta, wmax, eps=1e-12)
-    assert False
+    basis = FiniteTempBasis(stat, beta, wmax, eps=1e-12, kernel=KernelFFlat(beta*wmax))
     smpl_matsu = MatsubaraSampling(basis, vsample)
     smpl_tau = TauSampling(basis, tausample)
 

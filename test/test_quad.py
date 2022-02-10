@@ -1,6 +1,6 @@
 import numpy as np
 from numpy.polynomial.legendre import leggauss
-from spmomega.quad import scale_quad, composite_leggauss
+from spm_omega.quad import scale_quad, composite_leggauss
 
 def test_scale_quad():
     """ Integrate x^3 over [0, 3] """

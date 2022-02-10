@@ -21,12 +21,12 @@ def extract_version(*parts):
     return match.group(1)
 
 
-VERSION = extract_version('src', 'admmsolver', '__init__.py')
+VERSION = extract_version('src', 'spm_omega', '__init__.py')
 REPO_URL = "https://github.com/SpM-lab/sparse_ir"
 LONG_DESCRIPTION = readfile('README.md')
 
 setup(
-    name='spmomega',
+    name='spm_omega',
     version=VERSION,
 
     description=
@@ -53,13 +53,12 @@ setup(
     install_requires=[
         'numpy',
         'scipy',
-        'sparse_ir',
-        'admmsolver>=0.6',
-        'xprec'
+        'sparse_ir>=0.45',
+        'admmsolver>=0.7.1',
+        'xprec>=1.1'
     ],
     extras_require={
-        'test': ['pytest'],
-        'doc': ['sphinx>=2.1', 'myst-parser', 'sphinx_rtd_theme'],
+        'test': ['pytest', 'mypy'],
         },
 
     package_dir={'': 'src'},
