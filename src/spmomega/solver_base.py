@@ -171,7 +171,7 @@ class AnaContBase:
             W.append(b)
 
         # Extend the shape of V to include singular component
-        V = list(map(_add_zero_column, V))
+        V = [cast(np.ndarray, _add_zero_column(V_)) for V_ in V]
 
         ###
         #  Regularization
