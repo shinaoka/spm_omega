@@ -53,7 +53,7 @@ setup(
     install_requires=[
         'numpy',
         'scipy',
-        'sparse_ir>=0.45',
+        'sparse_ir>=0.4.5',
         'admmsolver>=0.7.1',
         'xprec>=1.1'
     ],
