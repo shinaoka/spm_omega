@@ -275,6 +275,7 @@ class SpMSmoothBase:
         """
         Evaluate Green's function
         """
+        rho = None, None # type: Tuple[Optional[np.ndarray], Optional[np.ndarray]]
         if self._P_aug is not None:
             rho = x[0:self._smpl_w.size, :, :], x[self._smpl_w.size, :, :]
         else:
