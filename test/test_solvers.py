@@ -3,6 +3,7 @@ from typing import Optional
 from spm_omega.solver import _prj_w_to_l, SpMSmooth, SpM
 from spm_omega.solver_base import InputType
 from spm_omega.solvers import AnaContSmooth
+from spm_omega.spm import AnaContSpM
 
 import numpy as np
 from sparse_ir import FiniteTempBasis, KernelFFlat, MatsubaraSampling, TauSampling
@@ -40,19 +41,25 @@ def get_singular_term_matsubara(type: Optional[str], ginput: np.ndarray):
     return np.zeros_like(ginput)
 
 
-@pytest.mark.parametrize("stat", ["B"])
+@pytest.mark.parametrize("SolverType", [AnaContSpM])
+#@pytest.mark.parametrize("SolverType", [AnaContSmooth])
+#@pytest.mark.parametrize("stat", ["F", "B"])
+@pytest.mark.parametrize("stat", ["F"])
 #@pytest.mark.parametrize("rho", [(rho_single_orb), (rho_two_orb)])
 @pytest.mark.parametrize("rho", [(rho_single_orb)])
 #@pytest.mark.parametrize("augment", [None, "HF"])
-@pytest.mark.parametrize("augment", [None])
-def test_smooth(stat, rho, augment):
+#@pytest.mark.parametrize("augment", [None])
+@pytest.mark.parametrize("augment", ["HF"])
+@pytest.mark.parametrize("reg_type", ["L1"])
+def test_smooth(SolverType, stat, rho, augment, reg_type):
     wmax = 10.0
     beta = 100.0
-    alpha = 1e-10
+    alpha = 1e-8
     niv = 1000
     shift = {"F": 1, "B": 0}[stat]
     vsample = 2*np.arange(-niv, niv) + shift
     tausample = np.linspace(0, beta, 2*niv)
+    niter = {"L1": 1000, "L2": 1000}[reg_type]
 
     basis = FiniteTempBasis(stat, beta, wmax, eps=1e-12, kernel=KernelFFlat(beta*wmax))
     smpl_matsu = MatsubaraSampling(basis, vsample)
@@ -67,20 +74,25 @@ def test_smooth(stat, rho, augment):
     # From Matsubara
     g_iv = smpl_matsu.evaluate(g_l, axis=0)
     g_iv += get_singular_term_matsubara(augment, g_iv)
-    solver = AnaContSmooth(
-        beta, wmax, stat, "freq", vsample, singular_term=augment)
-    rho_w, info = solver.solve(g_iv, alpha, niter=1000, spd=False)
+    solver = SolverType(
+        beta, wmax, stat, "freq", vsample, singular_term=augment,
+        reg_type=reg_type
+        )
+    x, info = solver.solve(g_iv, alpha, niter=niter, spd=True)
     print("info", info["lstsq"])
-    print("# ", rho_w[-1,0,0].real)
+    #print("debug", rho_w.shape, solver.smpl_real_w.shape)
+    #print("# ", rho_w[-1,0,0].real)
+    rho_w = solver.rho_omega(x, solver.smpl_real_w)
     for x_, y_ in zip(
         rho_w[0:solver.smpl_real_w.size], rho(solver.smpl_real_w)):
         print(x_[0,0].real, y_[0,0].real)
     np.testing.assert_allclose(
-        rho_w[0:solver.smpl_real_w.size], rho(solver.smpl_real_w), rtol=0, atol=0.05)
+        rho_w[0:solver.smpl_real_w.size], rho(solver.smpl_real_w), rtol=0, atol=0.15)
 
     # From tau
     if augment != "HF":
         gtau = smpl_tau.evaluate(g_l, axis=0)
-        solver = AnaContSmooth(beta, wmax, stat, "time", tausample)
-        rho_w, _ = solver.solve(gtau, alpha, niter=1000)
-        np.testing.assert_allclose(rho_w, rho(solver.smpl_real_w), rtol=0, atol=0.05)
+        solver = AnaContSmooth(beta, wmax, stat, "time", tausample, reg_type=reg_type)
+        x, _ = solver.solve(gtau, alpha, niter=niter)
+        rho_w = solver.rho_omega(x, solver.smpl_real_w)
+        np.testing.assert_allclose(rho_w, rho(solver.smpl_real_w), rtol=0, atol=0.15)

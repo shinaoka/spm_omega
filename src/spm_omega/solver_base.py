@@ -73,6 +73,7 @@ class AnaContBase:
             S, T are 2D and 1D array, respectively
         """
         assert a.shape[1] == b.shape[1], f"{a.shape} {b.shape}"
+        assert a.shape[1] == c.shape[1], f"{a.shape} {c.shape}"
         assert reg_type in ["L1", "L2"]
         assert len(sampling) == 1 or len(sampling) == 2
         assert np.unique([s_.sampling_points.size for s_ in sampling]).size == 1
@@ -88,6 +89,22 @@ class AnaContBase:
         self._c = c
         self._reg_type = reg_type
         self._sum_rule = sum_rule
+
+    def rho_omega(
+            self,
+            x: np.ndarray,
+            omega: np.ndarray
+        ) -> np.ndarray:
+        """ Compute rho(omega) """
+        assert x.ndim == 3
+        assert omega.ndim == 1
+        rho_l = np.einsum(
+            'lx,xij->lij',
+            self._a.asmatrix(),
+            x[0:self._a.shape[1],...],
+            optimize=True)
+        v_omega = self._bases[0].v(omega)
+        return np.einsum('lw,lij->wij', v_omega, rho_l, optimize=True)
 
 
     def solve(
@@ -133,8 +150,11 @@ class AnaContBase:
 
         nf = ginput.shape[1] # type: int
         nparam_normal = self._a.shape[1] * nf**2
+        assert isinstance(nparam_normal, int)
         nparam_singular = 0 if not self._is_augmented else nf**2
+        assert isinstance(nparam_singular, int)
         x_size = nparam_normal + nparam_singular
+        assert isinstance(x_size, int)
 
         ###
         # Fitting matrix
@@ -173,19 +193,48 @@ class AnaContBase:
         # Extend the shape of V to include singular component
         V = [cast(np.ndarray, _add_zero_column(V_)) for V_ in V]
 
+        equality_conditions = [] # type: List[EqualityCondition]
+
+
         ###
         #  Regularization
         ###
-        assert isinstance(self._b, DenseMatrix)
-        b_ = self._b.asmatrix()
-        if self._is_augmented:
-            b_ =  _add_zero_column(b_)
-        b_full = PartialDiagonalMatrix(b_, (nf, nf))
+        reg = None # type: Optional[ObjectiveFunctionBase]
+        if self._reg_type == "L1":
+            # x1 = b * x0 and |x1|_1
+            b_ = self._b
+            if self._is_augmented:
+                b_ =  _add_zero_column(b_)
+            b_full = PartialDiagonalMatrix(b_, (nf, nf))
+            equality_conditions.append(
+                EqualityCondition(
+                    0, 1, b_full, identity(int(b_full.shape[0]))
+                ),
+            )
+            reg = L1Regularizer(alpha, int(b_full.shape[0]))
+        elif self._reg_type == "L2":
+            # x1 = x0 and |b * x1|_2^2
+            if isinstance(self._b, DenseMatrix):
+                b_ = self._b.asmatrix()
+                if self._is_augmented:
+                    b_ =  _add_zero_column(b_)
+                b_full = PartialDiagonalMatrix(b_, (nf, nf))
+            elif isinstance(self._b, ScaledIdentityMatrix):
+                b_ = self._b
+                if self._is_augmented:
+                    b_ =  _add_zero_column(b_)
+                b_full = PartialDiagonalMatrix(b_, (nf, nf))
+            else:
+                raise RuntimeError("Unsupported!")
+            equality_conditions.append(
+                EqualityCondition(
+                    0, 1, identity(x_size), identity(x_size)
+                ),
+            )
+            reg = L2Regularizer(alpha, b_full)
+        assert reg is not None
 
         # Optimizer
-        equality_conditions = [
-            EqualityCondition(0, 1, identity(x_size), identity(x_size)),
-        ] # type: list[EqualityCondition]
         if len(V) != 0:
             lstsq = ConstrainedLeastSquares(
                 1.0, sua_full, ginput.ravel(),
@@ -195,8 +244,7 @@ class AnaContBase:
         else:
             lstsq = LeastSquares(1.0, sua_full, ginput.ravel())
 
-        assert b_full is not None
-        reg = {"L2": L2Regularizer, "L1": L1Regularizer}[self._reg_type](alpha, b_full)
+
         terms = [lstsq, reg] # type: List[ObjectiveFunctionBase]
         if spd:
             # Semi-positive definite condition on normal component
@@ -239,5 +287,7 @@ def _add_zero_column(a: Union[np.ndarray, MatrixBase]):
     elif isinstance(a, ScaledIdentityMatrix):
         diagonals = np.full(min(*a.shape), a.coeff)
         return DiagonalMatrix(diagonals, shape=(a.shape[0], a.shape[1]+1))
+    elif isinstance(a, DenseMatrix):
+        return DenseMatrix(_add_zero_column(a.asmatrix()))
     else:
         raise RuntimeError(f"Invalid type{type(a)}!")
