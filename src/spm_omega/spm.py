@@ -77,6 +77,7 @@ class AnaContSpM(object):
 
         # For semi positive definite condition
         self._smpl_real_w = oversample(np.hstack((-wmax, basis.v[-1].roots(), wmax)), oversampling)
+        assert bases[0].v is not None
         c = DenseMatrix(bases[0].v(self._smpl_real_w).T)
 
         self._solver = AnaContBase(
