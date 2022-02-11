@@ -1,9 +1,6 @@
 from typing import Optional
 
-from spm_omega.solver import _prj_w_to_l, SpMSmooth, SpM
-from spm_omega.solver_base import InputType
-from spm_omega.solvers import AnaContSmooth
-from spm_omega.spm import AnaContSpM
+from spm_omega import AnaContSmooth, AnaContSpM
 
 import numpy as np
 from sparse_ir import FiniteTempBasis, KernelFFlat, MatsubaraSampling, TauSampling
@@ -27,13 +24,6 @@ def rho_two_orb(omega):
     return np.einsum('ji,wjk,kl->wil', rot_mat, rho_omega, rot_mat)
 
 
-#def get_augmentation_freq(type: str, ginput: np.ndarray):
-    #if type == "HF":
-        ## DEBUG
-        ##return np.ones_like(ginput)
-        #return np.zeros_like(ginput)
-    #elif type == "omega0":
-        #pass
 
 def get_singular_term_matsubara(type: Optional[str], ginput: np.ndarray):
     if type == "HF":
@@ -41,17 +31,7 @@ def get_singular_term_matsubara(type: Optional[str], ginput: np.ndarray):
     return np.zeros_like(ginput)
 
 
-@pytest.mark.parametrize("SolverType", [AnaContSpM])
-#@pytest.mark.parametrize("SolverType", [AnaContSmooth])
-#@pytest.mark.parametrize("stat", ["F", "B"])
-@pytest.mark.parametrize("stat", ["F"])
-#@pytest.mark.parametrize("rho", [(rho_single_orb), (rho_two_orb)])
-@pytest.mark.parametrize("rho", [(rho_single_orb)])
-#@pytest.mark.parametrize("augment", [None, "HF"])
-#@pytest.mark.parametrize("augment", [None])
-@pytest.mark.parametrize("augment", ["HF"])
-@pytest.mark.parametrize("reg_type", ["L1"])
-def test_smooth(SolverType, stat, rho, augment, reg_type):
+def _test_solver(SolverType, stat, rho, augment, reg_type):
     wmax = 10.0
     beta = 100.0
     alpha = 1e-8
@@ -96,3 +76,21 @@ def test_smooth(SolverType, stat, rho, augment, reg_type):
         x, _ = solver.solve(gtau, alpha, niter=niter)
         rho_w = solver.rho_omega(x, solver.smpl_real_w)
         np.testing.assert_allclose(rho_w, rho(solver.smpl_real_w), rtol=0, atol=0.15)
+
+
+
+@pytest.mark.parametrize("stat", ["F", "B"])
+@pytest.mark.parametrize("rho", [(rho_single_orb), (rho_two_orb)])
+@pytest.mark.parametrize("augment", [None, "HF"])
+@pytest.mark.parametrize("reg_type", ["L1", "L2"])
+def test_smooth(stat, rho, augment, reg_type):
+    _test_solver(AnaContSmooth, stat, rho, augment, reg_type)
+
+
+
+@pytest.mark.parametrize("stat", ["F", "B"])
+@pytest.mark.parametrize("rho", [(rho_single_orb), (rho_two_orb)])
+@pytest.mark.parametrize("augment", [None, "HF"])
+@pytest.mark.parametrize("reg_type", ["L1"])
+def test_spm(stat, rho, augment, reg_type):
+    _test_solver(AnaContSpM, stat, rho, augment, reg_type)
