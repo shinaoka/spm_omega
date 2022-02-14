@@ -261,10 +261,10 @@ class AnaContBase:
         elif self._reg_type == "L2":
             # x1 = x0 and |b * x1|_2^2
             if isinstance(self._b, DenseMatrix):
-                b_ = self._b.asmatrix()
+                b_arr_ = self._b.asmatrix()  # type: np.ndarray
                 if self._is_augmented:
-                    b_ = _add_zero_column(b_)
-                b_full = PartialDiagonalMatrix(b_, (nf, nf))
+                    b_arr_ = cast(np.ndarray, _add_zero_column(b_arr_))
+                b_full = PartialDiagonalMatrix(b_arr_, (nf, nf))
             elif isinstance(self._b, ScaledIdentityMatrix):
                 b_ = self._b
                 if self._is_augmented:
@@ -281,6 +281,7 @@ class AnaContBase:
         assert reg is not None
 
         # Optimizer
+        lstsq = None  # type: Optional[ObjectiveFunctionBase]
         if len(V) != 0:
             lstsq = ConstrainedLeastSquares(
                 1.0, sua_full, ginput.ravel(),
