@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 __license__ = "MIT"
-__version__ = "0.3"
+__version__ = "0.4"
 
 
 from .smooth import AnaContSmooth
