@@ -100,8 +100,7 @@ class AnaContSmooth(object):
     def rho_omega(
             self,
             x: np.ndarray,
-            omega: np.ndarray
-        ) -> np.ndarray:
+            omega: np.ndarray) -> np.ndarray:
         """ Compute rho(omega) """
         intp = interp1d(
             self._smpl_real_w, x[0:self._smpl_real_w.size, :, :], axis=0)
@@ -113,7 +112,17 @@ class AnaContSmooth(object):
             alpha: float,
             niter: int = 10000,
             spd: bool = True,
-            interval_update_mu: int =100,
-            rtol: float = 1e-10
-        ) -> Tuple[np.ndarray, Dict]:
-        return self._solver.solve(ginput, alpha, niter, spd, interval_update_mu, rtol)
+            interval_update_mu: int = 100,
+            rtol: float = 1e-10) -> Tuple[np.ndarray, Dict]:
+        return self._solver.solve(
+            ginput, alpha, niter, spd, interval_update_mu, rtol)
+
+    def solve_elbow(
+            self,
+            ginput: np.ndarray,
+            alpha_min: float,
+            alpha_max: float,
+            n_alpha: int,
+            **kwargs) -> Tuple[np.ndarray, Dict]:
+        return self._solver.solve_elbow(
+            ginput, alpha_min, alpha_max, n_alpha, **kwargs)
