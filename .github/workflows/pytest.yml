@@ -34,11 +34,12 @@ jobs:
         run: |
           pip install .[test]
 
+      - name: Static type tests
+        run: |
+          pip install mypy -U
+          mypy --ignore-missing-imports test
+          mypy --ignore-missing-imports src
+
       - name: Test with pytest
         run: |
           pytest
-
-      - name: Static type tests
-        run: |
-          mypy --ignore-missing-imports test
-          mypy --ignore-missing-imports src
