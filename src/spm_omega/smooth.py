@@ -46,7 +46,7 @@ class AnaContSmooth(object):
         assert isinstance(sampling_points, np.ndarray) and \
             sampling_points.ndim == 1
         assert isinstance(oversampling, int)
-        assert moment is None or isinstance(moment, int)
+        assert moment is None or isinstance(moment, np.ndarray)
 
         basis = FiniteTempBasis(
             statistics, beta, wmax, eps=1e-15, kernel=KernelFFlat(beta * wmax))

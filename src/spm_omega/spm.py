@@ -25,10 +25,9 @@ class AnaContSpM(object):
             sampling_points: np.ndarray,
             moment: Optional[np.ndarray] = None,
             singular_term: Union[None, str] = None,
-            eps = 1e-15,
+            eps=1e-15,
             oversampling=1,
-            reg_type: str = "L1"
-        ) -> None:
+            reg_type: str = "L1") -> None:
         r"""
         To be written...
 
@@ -44,7 +43,7 @@ class AnaContSpM(object):
             input_type = {"time": InputType.TIME, "freq": InputType.FREQ}[input_type]
         assert isinstance(sampling_points, np.ndarray) and \
             sampling_points.ndim == 1
-        assert moment is None or isinstance(moment, int)
+        assert moment is None or isinstance(moment, np.ndarray)
 
         basis = FiniteTempBasis(
             statistics, beta, wmax, eps=eps, kernel=KernelFFlat(beta * wmax))
