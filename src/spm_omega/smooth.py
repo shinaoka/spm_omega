@@ -28,7 +28,8 @@ class AnaContSmooth(object):
             oversampling: int = 1,
             moment: Optional[np.ndarray] = None,
             singular_term: Union[None, str] = None,
-            reg_type: str = "L1"
+            reg_type: str = "L1",
+            eps: float = 1e-15
         ) -> None:
         r"""
         To be written...
@@ -40,6 +41,7 @@ class AnaContSmooth(object):
         """
         assert isinstance(beta, float)
         assert isinstance(wmax, float)
+        assert isinstance(eps, float)
         assert type(input_type) in [InputType, str]
         if isinstance(input_type, str):
             input_type = {"time": InputType.TIME, "freq": InputType.FREQ}[input_type]
@@ -48,7 +50,7 @@ class AnaContSmooth(object):
         assert isinstance(oversampling, int)
         assert moment is None or isinstance(moment, np.ndarray)
 
-        basis = FiniteTempBasis(statistics, beta, wmax, eps=1e-15)
+        basis = FiniteTempBasis(statistics, beta, wmax, eps=eps)
 
         # Fitting parameters for the normal component (sampling points in the real-frequency space)
         self._smpl_real_w = oversample(np.hstack((-wmax, basis.v[-1].roots(), wmax)), oversampling)

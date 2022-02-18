@@ -40,6 +40,7 @@ def get_singular_term_matsubara(type: Optional[str], ginput: np.ndarray):
 def _test_solver(SolverType, stat, rho, augment, reg_type):
     wmax = 10.0
     beta = 100.0
+    eps = 1e-7
     alpha = 1e-8
     niv = 1000
     shift = {"F": 1, "B": 0}[stat]
@@ -47,7 +48,7 @@ def _test_solver(SolverType, stat, rho, augment, reg_type):
     tausample = np.linspace(0, beta, 2*niv)
     niter = {"L1": 1000, "L2": 1000}[reg_type]
 
-    basis = FiniteTempBasis(stat, beta, wmax, eps=1e-12)
+    basis = FiniteTempBasis(stat, beta, wmax, eps=eps)
     smpl_matsu = MatsubaraSampling(basis, vsample)
     smpl_tau = TauSampling(basis, tausample)
 
@@ -62,7 +63,7 @@ def _test_solver(SolverType, stat, rho, augment, reg_type):
     g_iv += get_singular_term_matsubara(augment, g_iv)
     solver = SolverType(
         beta, wmax, stat, "freq", vsample, singular_term=augment,
-        reg_type=reg_type
+        reg_type=reg_type, eps=eps
     )
     x, info = solver.solve(g_iv, alpha, niter=niter, spd=True)
     rho_w = solver.rho_omega(x, solver.smpl_real_w)
@@ -77,7 +78,7 @@ def _test_solver(SolverType, stat, rho, augment, reg_type):
     if augment != "HF":
         gtau = smpl_tau.evaluate(g_l, axis=0)
         solver = AnaContSmooth(beta, wmax, stat, "time",
-                               tausample, reg_type=reg_type)
+                               tausample, reg_type=reg_type, eps=eps)
         x, _ = solver.solve(gtau, alpha, niter=niter)
         rho_w = solver.rho_omega(x, solver.smpl_real_w)
         np.testing.assert_allclose(rho_w, rho(
@@ -104,6 +105,7 @@ def test_elbow():
     stat = "F"
     wmax = 10.0
     beta = 100.0
+    eps = 1e-7
     alpha_min = 1e-10
     alpha_max = 1.0
     n_alpha = 5
@@ -112,7 +114,7 @@ def test_elbow():
     vsample = 2*np.arange(-niv, niv) + shift
     niter = 1000
 
-    basis = FiniteTempBasis(stat, beta, wmax, eps=1e-12)
+    basis = FiniteTempBasis(stat, beta, wmax, eps=eps)
     smpl_matsu = MatsubaraSampling(basis, vsample)
 
     # Compute exact rho_l, g_l, g_iv, g_tau
@@ -123,7 +125,7 @@ def test_elbow():
 
     # From Matsubara
     g_iv = smpl_matsu.evaluate(g_l, axis=0)
-    solver = AnaContSmooth(beta, wmax, stat, "freq", vsample)
+    solver = AnaContSmooth(beta, wmax, stat, "freq", vsample, eps=eps)
     x, info = solver.solve_elbow(
         g_iv, alpha_min, alpha_max, n_alpha, niter=niter)
 
