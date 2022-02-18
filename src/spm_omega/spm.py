@@ -3,7 +3,7 @@
 import numpy as np
 from typing import Optional, Union, Tuple, Dict, List
 
-from sparse_ir import FiniteTempBasis, MatsubaraSampling, TauSampling, KernelFFlat
+from sparse_ir import FiniteTempBasis, MatsubaraSampling, TauSampling
 from sparse_ir.augment import LegendreBasis, MatsubaraConstBasis
 
 from admmsolver.matrix import DenseMatrix, ScaledIdentityMatrix
@@ -45,8 +45,7 @@ class AnaContSpM(object):
             sampling_points.ndim == 1
         assert moment is None or isinstance(moment, np.ndarray)
 
-        basis = FiniteTempBasis(
-            statistics, beta, wmax, eps=eps, kernel=KernelFFlat(beta * wmax))
+        basis = FiniteTempBasis(statistics, beta, wmax, eps=eps)
 
         # Fitting parameters (i.e, rho_l) to rho_l
         a = ScaledIdentityMatrix(basis.size, coeff=1.0)
@@ -57,7 +56,9 @@ class AnaContSpM(object):
         sum_rule = None
         if moment is not None:
             assert moment.ndim == 2 and moment.shape[0] == moment.shape[1]
-            sum_rule = basis.s * (basis.u(0) + basis.u(basis.beta))
+            sum_rule_coeff = basis.s * (basis.u(0) + basis.u(basis.beta))
+            sum_rule_coeff = sum_rule_coeff.reshape((1,-1))
+            sum_rule = (sum_rule_coeff, moment)
 
         bases = [basis] #type: List[Union[FiniteTempBasis, LegendreBasis, MatsubaraConstBasis]]
         if singular_term is not None:

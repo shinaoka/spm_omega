@@ -53,9 +53,9 @@ setup(
     install_requires=[
         'numpy',
         'scipy',
-        'sparse_ir>=0.4.5',
-        'admmsolver>=0.7.3',
-        'xprec>=1.1'
+        'sparse_ir>=0.6.0',
+        'admmsolver>=0.7.4',
+        #'xprec>=1.1'
     ],
     extras_require={
         'test': ['pytest', 'mypy'],

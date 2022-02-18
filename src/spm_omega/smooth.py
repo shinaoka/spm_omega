@@ -4,7 +4,7 @@ import numpy as np
 from typing import Optional, Union, Tuple, Dict, List
 from scipy.interpolate import interp1d
 
-from sparse_ir import FiniteTempBasis, MatsubaraSampling, TauSampling, KernelFFlat
+from sparse_ir import FiniteTempBasis, MatsubaraSampling, TauSampling
 from sparse_ir.augment import LegendreBasis, MatsubaraConstBasis
 
 from admmsolver.matrix import DenseMatrix, ScaledIdentityMatrix
@@ -48,8 +48,7 @@ class AnaContSmooth(object):
         assert isinstance(oversampling, int)
         assert moment is None or isinstance(moment, np.ndarray)
 
-        basis = FiniteTempBasis(
-            statistics, beta, wmax, eps=1e-15, kernel=KernelFFlat(beta * wmax))
+        basis = FiniteTempBasis(statistics, beta, wmax, eps=1e-15)
 
         # Fitting parameters for the normal component (sampling points in the real-frequency space)
         self._smpl_real_w = oversample(np.hstack((-wmax, basis.v[-1].roots(), wmax)), oversampling)

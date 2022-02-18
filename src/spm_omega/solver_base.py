@@ -193,7 +193,8 @@ class AnaContBase:
         assert ginput.shape[1] == ginput.shape[2], \
             "Invalid shape of ginput"
         if isinstance(self._sum_rule, np.ndarray):
-            assert ginput.shape[1:] == self._sum_rule.shape
+            assert ginput.shape[1:] == self._sum_rule.shape,\
+                f"{ginput.shape[1:]} {self._sum_rule.shape}"
 
         nf = ginput.shape[1]  # type: int
         nparam_normal = self._a.shape[1] * nf**2
@@ -223,22 +224,23 @@ class AnaContBase:
             sua_full = PartialDiagonalMatrix(tmp, (nf, nf))
         else:
             sua_full = PartialDiagonalMatrix(T0SA0, (nf, nf))
+            print("sua_full", sua_full.shape)
 
         ###
         # Various contraints V*x = W on the normal component
         ###
-        V = []  # List[np.ndarray]
-        W = []  # List[np.ndarray]
+        V = None  # Optional[MatrixBase]
+        W = None  # Optional[np.ndarray]
 
         # Sum-rule constraint
         if self._sum_rule is not None:
             a, b = self._sum_rule
-            assert a.ndim == 2 and b.ndim == 1
-            V.append(a)
-            W.append(b)
+            assert a.ndim == 2 and b.ndim == 2
+            if self._is_augmented:
+                a = cast(np.ndarray, _add_zero_column(a))
+            V = PartialDiagonalMatrix(a, (nf, nf))
+            W = b.ravel()
 
-        # Extend the shape of V to include singular component
-        V = [cast(np.ndarray, _add_zero_column(V_)) for V_ in V]
 
         equality_conditions = []  # type: List[EqualityCondition]
 
@@ -282,11 +284,11 @@ class AnaContBase:
 
         # Optimizer
         lstsq = None  # type: Optional[ObjectiveFunctionBase]
-        if len(V) != 0:
+        if V is not None:
+            assert V is not None and W is not None
             lstsq = ConstrainedLeastSquares(
                 1.0, sua_full, ginput.ravel(),
-                np.vstack(V),
-                np.hstack(W)
+                V, W
             )
         else:
             lstsq = LeastSquares(1.0, sua_full, ginput.ravel())

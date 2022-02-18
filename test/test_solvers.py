@@ -3,7 +3,7 @@ from typing import Optional
 from spm_omega import AnaContSmooth, AnaContSpM
 
 import numpy as np
-from sparse_ir import FiniteTempBasis, KernelFFlat,\
+from sparse_ir import FiniteTempBasis,\
     MatsubaraSampling, TauSampling
 import pytest
 
@@ -47,8 +47,7 @@ def _test_solver(SolverType, stat, rho, augment, reg_type):
     tausample = np.linspace(0, beta, 2*niv)
     niter = {"L1": 1000, "L2": 1000}[reg_type]
 
-    basis = FiniteTempBasis(stat, beta, wmax, eps=1e-12,
-                            kernel=KernelFFlat(beta*wmax))
+    basis = FiniteTempBasis(stat, beta, wmax, eps=1e-12)
     smpl_matsu = MatsubaraSampling(basis, vsample)
     smpl_tau = TauSampling(basis, tausample)
 
@@ -113,8 +112,7 @@ def test_elbow():
     vsample = 2*np.arange(-niv, niv) + shift
     niter = 1000
 
-    basis = FiniteTempBasis(stat, beta, wmax, eps=1e-12,
-                            kernel=KernelFFlat(beta*wmax))
+    basis = FiniteTempBasis(stat, beta, wmax, eps=1e-12)
     smpl_matsu = MatsubaraSampling(basis, vsample)
 
     # Compute exact rho_l, g_l, g_iv, g_tau

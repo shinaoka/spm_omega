@@ -1,7 +1,7 @@
 import numpy as np
 from numpy.polynomial.legendre import leggauss
 
-from sparse_ir import FiniteTempBasis, KernelFFlat, MatsubaraSampling, TauSampling
+from sparse_ir import FiniteTempBasis
 from .quad import scale_quad
 
 def __oversample(x: np.ndarray):
