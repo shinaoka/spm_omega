@@ -224,7 +224,6 @@ class AnaContBase:
             sua_full = PartialDiagonalMatrix(tmp, (nf, nf))
         else:
             sua_full = PartialDiagonalMatrix(T0SA0, (nf, nf))
-            print("sua_full", sua_full.shape)
 
         ###
         # Various contraints V*x = W on the normal component
