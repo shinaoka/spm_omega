@@ -9,8 +9,8 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            numpy-version: 1.16
-            scipy-version: 1.4
+            numpy-version: 1.16.6
+            scipy-version: 1.4.1
             python-version: 3.6
           - os: ubuntu-latest
             numpy-version: auto
