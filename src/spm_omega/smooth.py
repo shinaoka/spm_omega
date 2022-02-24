@@ -165,6 +165,7 @@ class AnaContSmoothOpt(object):
         assert moment is None or isinstance(moment, np.ndarray)
 
         basis = FiniteTempBasis(statistics, beta, wmax, eps=eps)
+        self.basis = basis
 
         # Fitting parameters for the normal component
         # (sampling points in the real-frequency space)
@@ -207,10 +208,19 @@ class AnaContSmoothOpt(object):
                 c,
                 sum_rule=sum_rule,
             )
+        self._a = a
 
     @property
     def smpl_real_w(self):
         return self._smpl_real_w
+
+    def rho_l(self, x: np.ndarray) -> np.ndarray:
+        """ Convert solution to expansion coefficients in V_l(omega) """
+        return np.einsum('Ww,wij->Wij', self._a, x)
+
+    def g_l(self, x: np.ndarray) -> np.ndarray:
+        """ Convert solution to expansion coefficients in U_l(omega) """
+        return - self.basis.s[:, None, None] * self.rho_l(x)
 
     def rho_omega(
             self,
