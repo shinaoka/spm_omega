@@ -7,6 +7,8 @@ from sparse_ir import FiniteTempBasis,\
     MatsubaraSampling, TauSampling
 import pytest
 
+from spm_omega.smooth import AnaContSmoothOpt
+
 
 def gaussian(x, mu, sigma): return np.exp(-((x-mu)/sigma)**2) / \
     (np.sqrt(np.pi)*sigma)
@@ -35,6 +37,50 @@ def get_singular_term_matsubara(type: Optional[str], ginput: np.ndarray):
     if type == "HF":
         return np.ones_like(ginput)
     return np.zeros_like(ginput)
+
+
+@pytest.mark.parametrize("stat", ["F", "B"])
+@pytest.mark.parametrize("rho", [(rho_single_orb), (rho_two_orb)])
+def test_smooth_solver(stat, rho):
+    wmax = 10.0
+    beta = 100.0
+    eps = 1e-7
+    alpha = 1e-8
+    niv = 1000
+    shift = {"F": 1, "B": 0}[stat]
+    vsample = 2*np.arange(-niv, niv) + shift
+    tausample = np.linspace(0, beta, 2*niv)
+    niter = 1000
+
+    basis = FiniteTempBasis(stat, beta, wmax, eps=eps)
+    smpl_matsu = MatsubaraSampling(basis, vsample)
+    smpl_tau = TauSampling(basis, tausample)
+
+    # Compute exact rho_l, g_l, g_iv, g_tau
+    rho_test = rho(np.linspace(-1, 1, 100))
+    rho_l = basis.v.overlap(rho, axis=0)
+    rho_l = rho_l.reshape((basis.size,) + rho_test.shape[1:])
+    g_l = -basis.s[:, None, None] * rho_l
+
+    # From Matsubara
+    g_iv = smpl_matsu.evaluate(g_l, axis=0)
+    solver = AnaContSmoothOpt(beta, wmax, stat, "freq", vsample, eps=eps)
+    x, info = solver.solve(g_iv, alpha, niter=niter, spd=True)
+    rho_w = solver.rho_omega(x, solver.smpl_real_w)
+    for x_, y_ in zip(
+            rho_w[0:solver.smpl_real_w.size], rho(solver.smpl_real_w)):
+        print(x_[0, 0].real, y_[0, 0].real)
+    np.testing.assert_allclose(
+        rho_w[0:solver.smpl_real_w.size],
+        rho(solver.smpl_real_w), rtol=0, atol=0.15)
+
+    # From tau
+    gtau = smpl_tau.evaluate(g_l, axis=0)
+    solver = AnaContSmoothOpt(beta, wmax, stat, "time", tausample, eps=eps)
+    x, _ = solver.solve(gtau, alpha, niter=niter)
+    rho_w = solver.rho_omega(x, solver.smpl_real_w)
+    np.testing.assert_allclose(rho_w, rho(
+        solver.smpl_real_w), rtol=0, atol=0.15)
 
 
 def _test_solver(SolverType, stat, rho, augment, reg_type):

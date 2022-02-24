@@ -5,5 +5,5 @@ __license__ = "MIT"
 __version__ = "0.5"
 
 
-from .smooth import AnaContSmooth
+from .smooth import AnaContSmooth, AnaContSmoothOpt
 from .spm import AnaContSpM
