@@ -414,9 +414,9 @@ class SimpleAnaContBaseL2:
             #_, s0, _ = np.linalg.svd(self._fitmat)
             #_, s1, _ = np.linalg.svd(b.asmatrix())
             #self._coeff_alpha = s0[0]/s1[0]
-            self._coeff_alpha = np.linalg.norm(self._fitmat, ord="fro")\
-                /np.linalg.norm(b.asmatrix(), ord="fro")
-            #print("debug", self._coeff_alpha)
+            n1 = float(np.linalg.norm(self._fitmat, ord="fro"))
+            n2 = float(np.linalg.norm(b.asmatrix(), ord="fro"))
+            self._coeff_alpha = n1/n2
 
     def rho_omega(
             self,
