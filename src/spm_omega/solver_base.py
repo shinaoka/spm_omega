@@ -26,7 +26,7 @@ class AnaContBase:
 
     We model this analytic-continuation problem as
         G_{s,ij} = - \sum_l S_l U_{sl} * rho_{l,ij}
-                        + alpha * |\sum_l B_{tl} * rho_{l,ij}|_p^p
+                        + alpha^p * |\sum_l B_{tl} * rho_{l,ij}|_p^p
                         + \sum_n C_{sn} x'_{n,ij},
     where
         s: an imaginary time or an imaginary frequency,
@@ -350,7 +350,8 @@ class SimpleAnaContBaseL2:
             a: MatrixBase,
             b: MatrixBase,
             c: MatrixBase,
-            sum_rule: Optional[Tuple[np.ndarray, np.ndarray]] = None
+            sum_rule: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+            scale_alpha: bool = True
             ) -> None:
         r"""
         sampling:
@@ -389,6 +390,33 @@ class SimpleAnaContBaseL2:
         self._b = b
         self._c = c
         self._sum_rule = sum_rule
+
+
+        ###
+        # Fitting matrix
+        # Let (T0, T1) = self._sampling.matrix.a.
+        #
+        # Normal component:
+        #  g_smpl = - (T0 @ S @ A0) x
+        #
+        # Singular component:
+        #  g_smpl = T1 x'
+        ###
+        T0 = self._sampling.matrix.a
+        T0S = T0.copy()
+        T0S[:, 0:self._basis.size] *= -self._basis.s[None, :]
+        self._fitmat = T0S @ a.asmatrix()  # type: np.ndarray
+        assert isinstance(b, DenseMatrix)
+
+        # alpha
+        self._coeff_alpha = 1.0
+        if scale_alpha:
+            #_, s0, _ = np.linalg.svd(self._fitmat)
+            #_, s1, _ = np.linalg.svd(b.asmatrix())
+            #self._coeff_alpha = s0[0]/s1[0]
+            self._coeff_alpha = np.linalg.norm(self._fitmat, ord="fro")\
+                /np.linalg.norm(b.asmatrix(), ord="fro")
+            #print("debug", self._coeff_alpha)
 
     def rho_omega(
             self,
@@ -504,12 +532,12 @@ class SimpleAnaContBaseL2:
         # Singular component:
         #  g_smpl = T1 x'
         ###
-        T0 = self._sampling.matrix.a
-        T0S = T0.copy()
-        T0S[:, 0:self._basis.size] *= -self._basis.s[None, :]
-        fitmat = T0S @ self._a.asmatrix()  # type: np.ndarray
-        assert isinstance(self._b, DenseMatrix)
-        fitmat_ext = np.vstack((fitmat, np.sqrt(alpha) * self._b.asmatrix()))
+        #T0 = self._sampling.matrix.a
+        #T0S = T0.copy()
+        #T0S[:, 0:self._basis.size] *= -self._basis.s[None, :]
+        #fitmat = T0S @ self._a.asmatrix()  # type: np.ndarray
+        #assert isinstance(self._b, DenseMatrix)
+        fitmat_ext = np.vstack((self._fitmat, (self._coeff_alpha*alpha) * self._b.asmatrix()))
         fitmat_full = PartialDiagonalMatrix(fitmat_ext, (nf, nf))
 
         fitvec_full = np.vstack([ginput, np.zeros((self._b.shape[0], nf, nf))])

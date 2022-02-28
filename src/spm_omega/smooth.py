@@ -194,12 +194,6 @@ class AnaContSmoothOpt(object):
 
         c = ScaledIdentityMatrix(self._smpl_real_w.size, 1.0)
 
-        # alpha
-#        self._coeff_alpha = 1.0
-#        if scale_alpha:
-#            svd_a = np.linalg.svd(a)
-#            svd_b = np.linalg.svd(b)
-#            self.coeff_alpha = (svd_a[1][0]/svd_b[1][0])**2
 
         self._solver = SimpleAnaContBaseL2(
                 sampling,
@@ -207,6 +201,7 @@ class AnaContSmoothOpt(object):
                 DenseMatrix(b),
                 c,
                 sum_rule=sum_rule,
+                scale_alpha=scale_alpha
             )
         self._a = a
 
@@ -216,6 +211,8 @@ class AnaContSmoothOpt(object):
 
     def rho_l(self, x: np.ndarray) -> np.ndarray:
         """ Convert solution to expansion coefficients in V_l(omega) """
+        assert x.ndim == 3
+        assert x.shape[0] == self._a.shape[-1], f"{x.shape} {self._a.shape}"
         return np.einsum('Ww,wij->Wij', self._a, x)
 
     def g_l(self, x: np.ndarray) -> np.ndarray:
