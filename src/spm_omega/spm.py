@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 import numpy as np
 from typing import Optional, Union, Tuple, Dict, List
+from typing import Sequence
 
 from sparse_ir import FiniteTempBasis, MatsubaraSampling, TauSampling
 from sparse_ir.augment import LegendreBasis, MatsubaraConstBasis
@@ -60,6 +61,7 @@ class AnaContSpM(object):
             sum_rule_coeff = sum_rule_coeff.reshape((1,-1))
             sum_rule = (sum_rule_coeff, moment)
 
+        self.basis = basis
         bases = [basis] #type: List[Union[FiniteTempBasis, LegendreBasis, MatsubaraConstBasis]]
         if singular_term is not None:
             if singular_term == "omega0":
@@ -114,6 +116,7 @@ class AnaContSpM(object):
             niter: int = 10000,
             spd: bool = True,
             interval_update_mu: int =100,
-            rtol: float = 1e-10
+            rtol: float = 1e-10,
+            initial_guess: Sequence[np.ndarray] = None
         ) -> Tuple[np.ndarray, Dict]:
-        return self._solver.solve(ginput, alpha, niter, spd, interval_update_mu, rtol)
+        return self._solver.solve(ginput, alpha, niter, spd, interval_update_mu, rtol, initial_guess=initial_guess)
