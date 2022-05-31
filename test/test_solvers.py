@@ -6,6 +6,7 @@ import numpy as np
 from sparse_ir import FiniteTempBasis,\
     MatsubaraSampling, TauSampling
 import pytest
+from itertools import product
 
 from spm_omega.smooth import AnaContSmoothOpt
 
@@ -13,16 +14,36 @@ from spm_omega.smooth import AnaContSmoothOpt
 def gaussian(x, mu, sigma): return np.exp(-((x-mu)/sigma)**2) / \
     (np.sqrt(np.pi)*sigma)
 
-# Three-Gaussian model from SpM paper
+
+def overlap(v, rho):
+    r = rho(np.array([0.0, 0.0]))
+    if isinstance(r, np.ndarray):
+        assert r.ndim == 3
+        shape = r.shape[1:]
+        res = np.zeros((v.size, ) + shape, dtype=np.complex128)
+        print("shape", shape)
+        for i, j in product(range(shape[0]), range(shape[1])):
+            #f = lambda x: rho(x)[i,j]
+            #print("debug", rho(0.0))
+            #print("debug", f(0.0))
+            #print("debug", v.overlap(lambda x: rho(x)[0,i,j]).shape, v.size)
+            res[:, i,j] = v.overlap(lambda x: rho(x)[0,i,j]).ravel()
+        return res
+    else:
+        return v.overlap(rho)
 
 
 def rho_single_orb(omega):
     res = 0.2*gaussian(omega, 0.0, 0.15) + \
         0.4*gaussian(omega, 1.0, 0.8) + 0.4*gaussian(omega, -1.0, 0.8)
-    return res[:, None, None]
+    if isinstance(res, np.ndarray):
+        return res[:, None, None]
+    else:
+        return res[None, None, None]
 
 
 def rho_two_orb(omega):
+    omega = np.asarray(omega)
     theta = 0.2*np.pi
     rot_mat = np.array([[np.cos(theta), -np.sin(theta)],
                        [np.sin(theta), np.cos(theta)]])
@@ -58,7 +79,7 @@ def test_smooth_solver(stat, rho):
 
     # Compute exact rho_l, g_l, g_iv, g_tau
     rho_test = rho(np.linspace(-1, 1, 100))
-    rho_l = basis.v.overlap(rho, axis=0)
+    rho_l = overlap(basis.v, rho)
     rho_l = rho_l.reshape((basis.size,) + rho_test.shape[1:])
     g_l = -basis.s[:, None, None] * rho_l
 
@@ -100,7 +121,7 @@ def _test_solver(SolverType, stat, rho, augment, reg_type):
 
     # Compute exact rho_l, g_l, g_iv, g_tau
     rho_test = rho(np.linspace(-1, 1, 100))
-    rho_l = basis.v.overlap(rho, axis=0)
+    rho_l = overlap(basis.v, rho)
     rho_l = rho_l.reshape((basis.size,) + rho_test.shape[1:])
     g_l = -basis.s[:, None, None] * rho_l
 
@@ -165,7 +186,7 @@ def test_elbow():
 
     # Compute exact rho_l, g_l, g_iv, g_tau
     rho_test = rho_single_orb(np.linspace(-1, 1, 100))
-    rho_l = basis.v.overlap(rho_single_orb, axis=0)
+    rho_l = overlap(basis.v, rho_single_orb)
     rho_l = rho_l.reshape((basis.size,) + rho_test.shape[1:])
     g_l = -basis.s[:, None, None] * rho_l
 

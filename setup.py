@@ -22,7 +22,7 @@ def extract_version(*parts):
 
 
 VERSION = extract_version('src', 'spm_omega', '__init__.py')
-REPO_URL = "https://github.com/SpM-lab/sparse_ir"
+REPO_URL = "https://github.com/shinaoka/spm_omega/"
 LONG_DESCRIPTION = readfile('README.md')
 
 setup(
@@ -53,9 +53,8 @@ setup(
     install_requires=[
         'numpy',
         'scipy',
-        'sparse_ir>=0.6.0',
+        'sparse_ir>=0.12.0',
         'admmsolver>=0.7.4',
-        #'xprec>=1.1'
     ],
     extras_require={
         'test': ['pytest', 'mypy'],
